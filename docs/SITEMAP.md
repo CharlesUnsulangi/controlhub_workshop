@@ -100,7 +100,11 @@ Peran: Gudang, Admin · *(Mekanik: usul pengeluaran · ServiceAdvisor: review)*
    └─ /app/inv/sessions/{id}/close  Tutup Sesi (snapshot saldo akhir + update gudang)
 /app/inv/stock                     Stok per gudang/lokasi rak & kondisi (baru/bekas)
    └─ filter: warehouse · rak · condition (new/used/rebuilt)
-/app/inv/locations                 Lokasi rak (zona/rak/bay/level/bin + barcode)
+/app/inv/locations                 Setting Rak/Lokasi (pohon hierarki: area/zona/rak → bin)
+   ├─ /app/inv/locations/tree       Susun struktur (drag header & bin; tak terpola)
+   ├─ /app/inv/locations/generate   Generator massal bin dari pola (+ kode + barcode)
+   ├─ /app/inv/locations/{id}       Detail bin: purpose, kondisi, kapasitas, blok, barcode
+   └─ /app/inv/locations/slotting   Lokasi default per SKU (mode fixed/hybrid)
 /app/inv/part-issues               Bon Pengeluaran Sparepart (ref WO→LKM→truck)
    ├─ /app/inv/part-issues/create  Usul oleh Mekanik (qty diminta per part)
    ├─ /app/inv/part-issues/{id}/review   Review Service Officer (approve/reject, potong qty)

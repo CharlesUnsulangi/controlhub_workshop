@@ -117,6 +117,8 @@ Barang datang → SERAH TERIMA (GRN, WAJIB pilih PO)  🔁 GRN: draft
 ⚙️ **Tidak ada serah terima tanpa PO** (`po_id` wajib).
 ⚙️ Penerimaan sebagian → PO `partial`; `qty_received` per item bertambah.
 ⚙️ Stok TIDAK pernah diubah langsung — selalu lewat movement (per kondisi & lokasi rak).
+⚙️ **Putaway**: `location_id` bin diisi sesuai `slotting_mode` gudang — `fixed`=wajib bin default
+   SKU, `hybrid`=disarankan (`wks_inv_part_locations`), `dynamic`=bebas; kapasitas bin terlampaui → peringatan (soft).
 
 ---
 

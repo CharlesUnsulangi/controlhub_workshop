@@ -17,6 +17,8 @@
 > (`wks_inv_shift_sessions`; movement ter-tag, wajib sesi, snapshot full + anomali; R48/R49).
 > **Lapisan Notifikasi** (resolusi G3): `wks_adm_notification_rules`/`wks_adm_notifications`
 > (WA/email/in-app, dikonfigurasi di master); konsumen pertama = notif sesi >24 jam (R50, G17).
+> **Setting Rak/Lokasi**: `wks_mst_locations` hierarki fleksibel (`parent_id`+`node_type`,
+> generator massal, kapasitas soft) + slotting per gudang (`slotting_mode`, `wks_inv_part_locations`; R51).
 
 ## Cara Baca
 
@@ -90,6 +92,7 @@
 | R21 | Supersession part: stok lama vs baru tak ter-mapping | M | Sedang | 🟠 | Prosedur supersession (`superseded_by_id` + alih stok) | Terbuka |
 | R36 | **Reorder point tak bisa per-gudang** — dulu hanya di `spare_parts` (company-wide) | M | Sedang | 🟠 | Override `reorder_point`/`min_qty`/`max_qty` di `stock_values` (per gudang); null → default SKU | Termitigasi |
 | R37 | **Tak ada konversi UOM** — beli per box, simpan per pcs → qty/biaya beda satuan | M | Sedang | 🟠 | **Dukung konversi**: `wks_inv_part_uoms` (factor per SKU); UOM dasar utk stok/WAC; dokumen snapshot `uom_factor`; konversi di `StockService` | Termitigasi |
+| R51 | **Integritas lokasi** — stok nempel di node header (bukan bin), parent lintas-gudang, lokasi terhapus masih dipakai | M | Sedang | 🟠 | Validasi `stock_items.location_id` → hanya `is_storable=true` (bin); `parent_id` se-warehouse; FK restrict + `is_active`; regen `full_path` saat pindah | Terbuka |
 | R22 | **Posisi ban berbeda per tipe truk** (jumlah/axle beda) | M | Sedang | 🟠 | Template posisi per `truck_type` (mis. 4x2, 6x4) | Terbuka |
 | R23 | Fitur jual dormant: logika invoice/harga jual belum dirancang detail | M | Sedang | 🟡 | Feature-flag bersih; rancang detail saat diaktifkan; kolom nullable siap | Diterima |
 | R42 | **Core return tak ditegakkan** → part baru keluar tanpa bukti bekas (fraud) | M | Tinggi | 🟠 | Gate tutup WO: non-consumable wajib `wks_inv_core_returns` 1:1 (qty cocok); `categories.is_consumable` | Termitigasi |

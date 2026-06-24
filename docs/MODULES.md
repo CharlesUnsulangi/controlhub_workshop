@@ -204,7 +204,13 @@ pergerakan, valuasi, opname, serta dokumen serah terima & surat jalan.
   & brand aftermarket sebagai **cross-reference** di `wks_inv_part_numbers` — banyak per SKU;
   cari part dari nomor mana pun → ketemu SKU; supersession via `superseded_by_id`),
   kategori, satuan, fitment. Standar Hino = nomor OEM utama untuk part Hino.
-- **Gudang ber-rak terstruktur** — lokasi `zona/rak/bay/level/bin` + barcode (`wks_mst_locations`).
+- **Setting Rak/Lokasi** — `wks_mst_locations` **hierarki fleksibel** (`parent_id` + `node_type`
+  area/zona/rak/shelf→bin; tak terpola) untuk menggambarkan struktur; bin = leaf storable +
+  barcode. Atribut bin: `purpose` (storage/receiving/shipping/quarantine/scrap/staging),
+  `condition_scope`, **kapasitas (soft warning)**, pick priority, blok. **Generator massal**:
+  dari pola (mis. zona A, rak 01–10, level 1–5) buat ratusan bin + kode + barcode sekaligus
+  (opsional, bukan keharusan). **Slotting** dapat di-set per gudang (`slotting_mode`
+  dynamic/fixed/hybrid) + lokasi default per SKU (`wks_inv_part_locations`).
 - **Stok baru vs bekas** — dimensi `condition` (new/used/rebuilt); saldo & WAC terpisah;
   gudang bisa dikhususkan `condition_scope=new/used` (gudang part baru vs bekas).
   Part bekas masuk dari **teardown/copotan** (movement `ref=teardown`, bukan PO).
@@ -232,6 +238,8 @@ pergerakan, valuasi, opname, serta dokumen serah terima & surat jalan.
 - `wks_inv_spare_parts` — **sku** (internal), name, primary_make, superseded_by_id, …
 - `wks_inv_part_numbers` — spare_part_id, ref_type(oem/aftermarket), brand, part_no, is_primary
 - `wks_inv_part_uoms` — spare_part_id, uom_id, **factor** (konversi ke UOM dasar), is_purchase_default, barcode
+- `wks_mst_locations` (master) — hierarki rak/bin (parent_id, node_type, purpose, kapasitas, barcode)
+- `wks_inv_part_locations` — slotting: lokasi default/home bin per SKU (mode fixed/hybrid)
 - `wks_inv_stock_alerts` — alert stok negatif/di bawah ambang + status + notifikasi
 - `wks_inv_core_returns` — register part bekas rusak (bukti old-for-new): wo_item (1:1), truck/lkm telusur, disposition held/scrapped
 - `wks_inv_scrap_disposals` — lot penjualan/pembuangan scrap *(ringan, future)*

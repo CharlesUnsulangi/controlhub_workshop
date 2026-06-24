@@ -257,25 +257,47 @@ Daftar enum terpusat ada di **§12**.
 | name | varchar(80) | no | |
 | type | varchar(15) | no | enum warehouse_type (sparepart/tyre/both) |
 | condition_scope | varchar(10) | no | enum condition_scope (any/new/used); default `any` — gudang khusus part **baru**/**bekas** |
+| slotting_mode | varchar(10) | no | enum slotting_mode (dynamic/fixed/hybrid); default `dynamic` — **dapat di-set per gudang** |
 | is_active | bool | no | default true |
 | timestamps, deleted_at | | | |
 
-### wks_mst_locations  *(rak/bin terstruktur)*
+> **slotting_mode:** `dynamic` = taruh di bin kosong mana pun; `fixed` = wajib di lokasi default
+> SKU (`wks_inv_part_locations`); `hybrid` = lokasi default disarankan tapi boleh di mana saja.
+
+### wks_mst_locations  *(rak/bin — hierarki fleksibel, tak terpola)*
 | Kolom | Tipe | Null | Keterangan |
 |---|---|---|---|
 | id | bigint | no | PK |
 | company_id | bigint | no | FK |
 | warehouse_id | bigint | no | FK |
-| code | varchar(30) | no | kode lokasi mis. `A-01-03` — **unique(warehouse_id, code)** |
-| zone | varchar(20) | yes | zona/area |
-| rack | varchar(20) | yes | rak |
-| bay | varchar(20) | yes | kolom/baris |
-| level | varchar(20) | yes | tingkat |
-| bin | varchar(20) | yes | kotak/slot |
-| location_type | varchar(15) | no | enum location_type (rack/floor/staging); default `rack` |
-| barcode | varchar(50) | yes | label scan |
+| parent_id | bigint | yes | **FK self** — hierarki fleksibel (header area/zona/rak → bin); null = root |
+| node_type | varchar(10) | no | enum location_node (area/zone/rack/shelf/bin); default `bin` — **header vs bin** |
+| code | varchar(30) | no | kode segmen (mis. `A`, `R01`, `B-03`) — **unique(warehouse_id, parent_id, code)** |
+| name | varchar(60) | yes | label tampil header/bin |
+| full_path | varchar(150) | yes | kode tergabung dari root (mis. `A / R01 / L3 / B05`) — denormalized, regen saat pindah |
+| zone | varchar(20) | yes | atribut bebas (opsional, tak wajib terpola) |
+| rack | varchar(20) | yes | atribut bebas |
+| bay | varchar(20) | yes | atribut bebas |
+| level | varchar(20) | yes | atribut bebas |
+| bin | varchar(20) | yes | atribut bebas |
+| is_storable | bool | no | default true — **hanya bin (leaf) yang menampung stok**; header = false |
+| purpose | varchar(12) | no | enum location_purpose (storage/receiving/shipping/quarantine/scrap/staging); default `storage` |
+| condition_scope | varchar(10) | no | enum condition_scope (any/new/used); default `any` — bin khusus baru/bekas |
+| capacity_qty | decimal(15,3) | yes | kapasitas (qty) — **soft warning** bila terlampaui |
+| max_weight_kg | decimal(15,3) | yes | kapasitas berat — soft warning |
+| pick_priority | smallint | no | default 0 — urutan saran ambil/putaway |
+| is_pickable | bool | no | default true |
+| is_blocked | bool | no | default false — bin diblok (rusak/audit) |
+| blocked_reason | varchar(100) | yes | |
+| barcode | varchar(50) | yes | label scan — **unique(company_id, barcode)** bila terisi |
 | is_active | bool | no | default true |
-| timestamps | | | |
+| timestamps | | | index(warehouse_id, parent_id) |
+
+> **Hierarki fleksibel (tak terpola):** `parent_id` + `node_type` membuat pohon bebas —
+> header (`area/zone/rack/shelf`, `is_storable=false`) untuk **menggambarkan struktur**, bin
+> (`is_storable=true`) untuk menampung stok. Tak ada kedalaman wajib: boleh langsung
+> `rack → bin`, atau `zone → rack → shelf → bin`. `stock_items.location_id` selalu menunjuk
+> **bin** (leaf storable). `full_path` untuk tampil/cari. Setup massal lihat **generator** (§ MODULES §8).
 
 ### wks_mst_uoms
 | id · company_id (FK) · code `varchar(15)` · name `varchar(40)` · timestamps · **unique(company_id, code)** |
@@ -353,6 +375,24 @@ Daftar enum terpusat ada di **§12**.
 > Dokumen beli/terima/keluar mencatat satuan + **`uom_factor` ter-snapshot** di barisnya;
 > `StockService` mengonversi ke UOM dasar sebelum posting (qty_base = qty × factor,
 > unit_cost_base = unit_price ÷ factor). Stok & WAC selalu UOM dasar.
+
+### wks_inv_part_locations  *(slotting — lokasi default/home bin per SKU; dipakai bila mode fixed/hybrid)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| company_id | bigint | no | FK |
+| spare_part_id | bigint | no | FK |
+| warehouse_id | bigint | no | FK |
+| location_id | bigint | no | FK locations (**bin** storable) |
+| condition | varchar(10) | no | part_condition; default `new` |
+| is_default | bool | no | default true — bin utama (saran putaway/pick) |
+| max_qty | decimal(15,3) | yes | batas slot (fixed slotting) — soft |
+| note | varchar(255) | yes | |
+| timestamps | | | **unique(company_id, spare_part_id, warehouse_id, location_id, condition)** |
+
+> Dipakai sesuai `warehouses.slotting_mode`: `dynamic` → tabel ini opsional/kosong (taruh bebas);
+> `hybrid` → `is_default` jadi **saran** putaway, boleh ditimpa; `fixed` → putaway **wajib** ke
+> lokasi default. Satu SKU bisa punya >1 bin (mis. new vs used kondisi beda, atau multi-bin).
 
 ### wks_inv_stock_items  *(saldo FISIK live, per rak/bin — agregat dari movements)*
 | Kolom | Tipe | Null | Keterangan |
@@ -1026,7 +1066,8 @@ po_orders 1─* po_order_items ; po_orders 1─* po_goods_receipts (po_id WAJIB)
 po_goods_receipt_items ─▶ inv_stock_movements (part) | tyre_tyres (ban)
 inv_delivery_orders 1─* inv_delivery_order_items ─▶ inv_stock_movements (out/transfer)
 inv_tally_sheets ─▶ (delivery_order | goods_receipt) 1─* inv_tally_sheet_items
-mst_warehouses 1─* mst_locations (zona/rak/bay/level/bin) ; warehouse.condition_scope=new/used
+mst_warehouses 1─* mst_locations (hierarki parent_id: area/zone/rack/shelf→bin) ; warehouse.condition_scope/slotting_mode
+inv_part_locations: SKU →(default bin) location (slotting fixed/hybrid)
 inv_stock_items/movements ber-dimensi condition (new/used/rebuilt)
 lkm_entries 1─* lkm_inspections ; lkm_entries 1─1 lkm_gateouts
 lkm_entries 1─* svc_work_orders 1─* svc_work_order_items
@@ -1056,7 +1097,9 @@ svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 | condition_scope | any, new, used |
 | part_condition | new, used, rebuilt |
 | part_ref_type | oem, aftermarket |
-| location_type | rack, floor, staging |
+| location_node | area, zone, rack, shelf, bin |
+| location_purpose | storage, receiving, shipping, quarantine, scrap, staging |
+| slotting_mode | dynamic, fixed, hybrid |
 | category_type | part, tyre |
 | mechanic_status | active, inactive |
 | movement_type | in, out, transfer_in, transfer_out, adjustment |
