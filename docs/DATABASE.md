@@ -81,6 +81,7 @@ Daftar enum terpusat ada di **§12**.
 | id | bigint | no | PK |
 | company_id | bigint | yes | FK companies. **null = super admin Core** |
 | branch_id | bigint | yes | FK branches (cabang default user) |
+| supplier_id | bigint | yes | FK suppliers — **akun portal supplier** (panel `/vendor`); null = user internal |
 | name | varchar(150) | no | |
 | email | varchar(150) | no | **unique** |
 | password | varchar(255) | no | |
@@ -584,6 +585,34 @@ Daftar enum terpusat ada di **§12**.
 > `wks_inv_part_uoms` saat baris dibuat. Base: qty_base = qty × factor, unit_cost_base =
 > unit_price ÷ factor (dipakai stok & WAC). `qty_received` dalam satuan dokumen yang sama.
 
+### wks_po_supplier_deliveries  *(Surat Jalan MASUK dari supplier — per PO; bisa diisi supplier via portal)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| company_id | bigint | no | FK |
+| branch_id | bigint | yes | FK (tujuan kirim) |
+| po_id | bigint | no | FK po_orders — **wajib** (SJ selalu atas PO) |
+| supplier_id | bigint | no | FK suppliers (dari PO) |
+| supplier_do_no | varchar(40) | no | **nomor surat jalan menurut supplier** |
+| ship_date | date | yes | tanggal kirim |
+| eta | date | yes | perkiraan tiba |
+| driver_name | varchar(100) | yes | sopir pengirim |
+| vehicle_no | varchar(20) | yes | nopol kendaraan |
+| status | varchar(15) | no | enum supplier_delivery_status (draft/submitted/received/cancelled); default `draft` |
+| source | varchar(10) | no | enum supplier_delivery_source (portal/manual); default `manual` |
+| created_by | bigint | yes | FK users — staf (manual) **atau supplier user (portal)** |
+| note | varchar(255) | yes | |
+| timestamps | | | **unique(company_id, supplier_id, supplier_do_no)** · index(company_id, po_id) |
+
+### wks_po_supplier_delivery_items
+| id · supplier_delivery_id (FK) · po_item_id (FK po_order_items) · item_type `varchar(15)` (spare_part/tyre_product) · item_id · condition `varchar(10)` (part_condition; default new) · qty_shipped `decimal(15,3)` (satuan dokumen PO) · note |
+
+> **Alur:** supplier (atau staf) daftarkan SJ atas PO → `submitted`. Saat barang tiba, **GRN
+> merujuk SJ** (`supplier_delivery_id`) → tally → posting; status SJ → `received`. SJ **opsional**:
+> bila supplier tak pakai portal, staf cukup isi `do_supplier_no` teks di GRN (fallback).
+> **Telusur** brand/nomor part nyata tetap di GRN item (`part_number_id`). Portal supplier
+> (panel `/vendor`, login akun supplier) = **fase berikutnya** (feature-flag); kini `source=manual`.
+
 ### wks_po_goods_receipts (Serah Terima / GRN — **WAJIB ref PO**)
 | Kolom | Tipe | Null | Keterangan |
 |---|---|---|---|
@@ -594,7 +623,8 @@ Daftar enum terpusat ada di **§12**.
 | po_id | bigint | **no** | FK po_orders — **wajib** (tak ada serah terima tanpa PO) |
 | supplier_id | bigint | no | FK (dari PO) |
 | warehouse_id | bigint | no | FK tujuan |
-| do_supplier_no | varchar(40) | yes | no. surat jalan supplier |
+| supplier_delivery_id | bigint | yes | FK supplier_deliveries — SJ masuk terdaftar (opsional) |
+| do_supplier_no | varchar(40) | yes | no. surat jalan supplier (fallback teks bila tanpa SJ terdaftar) |
 | status | varchar(15) | no | enum gr_status (draft/checking/posted) |
 | received_at | timestamptz | no | |
 | received_by | bigint | yes | FK users |
@@ -945,6 +975,8 @@ svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 | core_return_status | pending, stored, released |
 | scrap_disposal_type | sold, discarded |
 | part_issue_status | draft, submitted, approved, rejected, partially_issued, issued, cancelled |
+| supplier_delivery_status | draft, submitted, received, cancelled |
+| supplier_delivery_source | portal, manual |
 | tax_type | exclusive, inclusive, non_pkp |
 | price_item_type | spare_part, tyre_product |
 | price_source | manual, bulk, import |

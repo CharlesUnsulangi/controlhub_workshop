@@ -94,8 +94,14 @@ Purchase Order (pilih supplier)      🔁 PO: draft
    • harga & pajak DI-SNAPSHOT ke wks_po_order_items
         │ approval
         ▼                            🔁 PO: approved
+(opsional) SURAT JALAN MASUK dari supplier (📄 wks_po_supplier_deliveries)
+   • supplier daftarkan via portal /vendor (source=portal) ATAU staf input (source=manual)
+   • atas PO; isi supplier_do_no + qty_shipped per baris   🔁 SJ: submitted
+        │
+        ▼
 Barang datang → SERAH TERIMA (GRN, WAJIB pilih PO)  🔁 GRN: draft
-   • tarik baris dari PO (qty_doc); isi do_supplier_no
+   • tarik baris dari PO (qty_doc); rujuk SJ masuk (supplier_delivery_id) bila ada,
+     selain itu isi do_supplier_no manual (fallback)        🔁 SJ: received
         │ hitung fisik
         ▼                            🔁 GRN: checking
    Tally Sheet (bongkar) → counted_qty per item & kondisi → isi qty_received

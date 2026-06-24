@@ -170,8 +170,9 @@ Reorder point tercapai / WO butuh part
 | RBAC | Filament Shield (roles/permissions per company) |
 | API (bila perlu) | Laravel API Resources (mis. integrasi) |
 
-**Pola:** aplikasi back-office berbasis **Filament** (2 panel: `App` untuk tenant,
-`System` untuk Core/super-admin). Logika bisnis di **Service class**; mutasi stok/uang
+**Pola:** aplikasi back-office berbasis **Filament** (2 panel inti: `App` untuk tenant,
+`System` untuk Core/super-admin; + panel **`Vendor`** `/vendor` untuk portal supplier —
+fase berikutnya, feature-flag). Logika bisnis di **Service class**; mutasi stok/uang
 selalu dalam `DB::transaction()` lewat `StockService`. Detail di
 `.claude/skills/workshop-feature/SKILL.md`.
 

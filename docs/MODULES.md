@@ -161,21 +161,28 @@ gate-out + surat jalan, jadi sumber Work Order, laporan turnaround.
 
 **Tujuan:** pengadaan sparepart dari supplier: permintaan → PO → penerimaan ke gudang.
 
-**Fitur:** (opsional) Purchase Request, PO ke supplier + approval, **Serah Terima barang
-(GRN) yang WAJIB merujuk PO** → tally → posting → tambah stok via `StockService` (movement
-*in*), penerimaan partial, riwayat & status PO.
+**Fitur:** (opsional) Purchase Request, PO ke supplier + approval, **Surat Jalan MASUK dari
+supplier** (per PO; bisa didaftarkan supplier via **portal supplier**), **Serah Terima barang
+(GRN) yang WAJIB merujuk PO** (boleh merujuk SJ masuk) → tally → posting → tambah stok via
+`StockService` (movement *in*), penerimaan partial, riwayat & status PO.
 
 **Tabel** (dengan `company_id`, `branch_id`)
 - `wks_po_requests`, `wks_po_request_items`  *(opsional)*
 - `wks_po_orders` — po_no, supplier_id, order_date, status, total
 - `wks_po_order_items` — po_order_id, item, qty, unit_price, tax, qty_received
-- `wks_po_goods_receipts` — grn_no, **po_id (WAJIB)**, supplier_id, warehouse_id, status, do_supplier_no
+- `wks_po_supplier_deliveries`, `wks_po_supplier_delivery_items` — **Surat Jalan masuk** per PO (supplier_do_no, qty_shipped, source portal/manual)
+- `wks_po_goods_receipts` — grn_no, **po_id (WAJIB)**, supplier_id, warehouse_id, status, **supplier_delivery_id** (opsional), do_supplier_no (fallback)
 - `wks_po_goods_receipt_items` — grn_id, po_item_id, item, condition, qty_doc, qty_received, unit_cost, location_id
 
 **Integrasi:** Serah Terima = satu-satunya jalur "stok masuk pembelian", **selalu ber-PO**,
 melewati **tally** (lihat §8b) → `StockService`; tidak mengubah stok langsung.
 
-**Peran:** `Purchasing`, `Gudang`, approval `Owner`/`Admin`.
+**Portal Supplier (panel `/vendor`, fase berikutnya):** supplier login (akun di `users` +
+`supplier_id`, peran `Supplier`), lihat PO yang ditujukan padanya, **daftarkan Surat Jalan**.
+Di-scope ketat per `supplier_id` (+ company). Kini entri SJ oleh staf (`source=manual`);
+portal diaktifkan via feature-flag. ⚠️ Surat Jalan MASUK (ini) ≠ Surat Jalan KELUAR (`wks_inv_delivery_orders`, §8b).
+
+**Peran:** `Purchasing`, `Gudang`, approval `Owner`/`Admin`; **`Supplier`** (portal, read PO + tulis SJ sendiri).
 
 ---
 

@@ -1,8 +1,9 @@
 # ControlHub Workshop — Sitemap Aplikasi
 
-> Perencanaan (v0.1). Selaras dengan `MODULES.md`. Dua surface:
+> Perencanaan (v0.1). Selaras dengan `MODULES.md`. Tiga surface:
 > **(A) System/Core** untuk super admin penyedia aplikasi, **(B) App Tenant** untuk
-> pengguna bengkel (scoped `company_id`, dengan pemilih **branch**).
+> pengguna bengkel (scoped `company_id`, dengan pemilih **branch**), **(V) Portal Supplier**
+> (`/vendor`, fase berikutnya) untuk supplier eksternal (scoped `supplier_id`).
 
 Konvensi route: prefix mengikuti sub-prefix modul (`/inv`, `/po`, `/lkm`, `/svc`,
 `/tyre`, `/admin`). Nama route: `wks.<area>.<resource>.<action>` (lihat NAMING_CONVENTIONS §5).
@@ -135,8 +136,11 @@ Peran: Purchasing, Gudang, Admin (approval: Owner/Admin)
 /app/po/orders                     Daftar Purchase Order
    ├─ /app/po/orders/create
    └─ /app/po/orders/{id}          Detail + approval + status
+/app/po/supplier-deliveries        Surat Jalan MASUK dari supplier (per PO)
+   ├─ /app/po/supplier-deliveries/create   Daftarkan SJ (staf; supplier via portal /vendor)
+   └─ /app/po/supplier-deliveries/{id}     Detail SJ + item dikirim
 /app/po/receipts                   Serah Terima / GRN (WAJIB pilih PO)
-   ├─ /app/po/receipts/create      pilih PO → input penerimaan
+   ├─ /app/po/receipts/create      pilih PO (+ opsional SJ masuk) → input penerimaan
    ├─ .../tally                    Tally sheet (hitung fisik bongkar)
    └─ .../post                     Posting → tambah stok (StockService)
 /app/po/reports                    Riwayat pembelian per part/supplier
@@ -199,6 +203,25 @@ Peran: Owner, Admin, (sebagian) Kasir
 
 ---
 
+## V. PORTAL SUPPLIER  (`/vendor`) — *fase berikutnya (feature-flag)*
+Peran: **Supplier** (akun di `users` + `supplier_id`; panel Filament terpisah).
+Scope ketat: hanya data milik `supplier_id` sendiri (+ company). **Read** PO yang ditujukan
+padanya; **tulis** Surat Jalan miliknya saja.
+```
+/vendor/login                      Login supplier (akun undangan)
+/vendor/dashboard                  Ringkasan PO aktif & SJ
+/vendor/purchase-orders            Daftar PO ke supplier ini (read-only)
+   └─ /vendor/purchase-orders/{id} Detail PO (item, qty, status penerimaan)
+/vendor/deliveries                 Surat Jalan yang didaftarkan supplier
+   ├─ /vendor/deliveries/create    Buat SJ atas PO (pilih PO → qty kirim per item)
+   └─ /vendor/deliveries/{id}      Detail + status (submitted/received)
+/vendor/profile                    Profil & kontak supplier
+```
+> Entri SJ awalnya oleh staf di `/app/po/supplier-deliveries` (`source=manual`); portal ini
+> mengaktifkan supplier mengisi sendiri (`source=portal`). Dibangun setelah core internal.
+
+---
+
 ## C. Matriks Akses Menu (ringkas)
 
 | Menu \ Peran | Super Admin | Owner | Admin | Service Advisor | Mekanik | Gudang | Purchasing | Kasir |
@@ -217,6 +240,10 @@ Peran: Owner, Admin, (sebagian) Kasir
 | Laporan | – | ✅ | ✅ | – | – | r | r | r |
 
 `✅` akses penuh · `r` read-only · `–` tidak ada akses. (Final via RBAC `wks_adm_permissions`.)
+
+> **Catatan peran khusus:** **Supplier** tidak ada di matriks ini — aksesnya **hanya** di
+> surface **V. Portal Supplier** (`/vendor`), scoped `supplier_id`. Pada **Pengeluaran Sparepart**
+> (`/app/inv/part-issues`): Mekanik *usul*, Service Advisor *review/approve*, Gudang *issue*.
 
 ---
 

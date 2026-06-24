@@ -11,6 +11,9 @@
 > (bukti rusak → scrap; R42–R44, tabel `wks_inv_core_returns`/`scrap_disposals`).
 > **Pengeluaran sparepart** ber-approval (usul Mekanik → review ServiceAdvisor → keluar
 > Gudang; `wks_inv_part_issues`, SoD; R45) tersambung WO→LKM→truck.
+> **Surat Jalan MASUK dari supplier** (`wks_po_supplier_deliveries`, per PO; GRN merujuk,
+> fallback manual) + **Portal Supplier** panel `/vendor` (akun `users.supplier_id`, fase
+> berikutnya; R46/R47, G16).
 
 ## Cara Baca
 
@@ -61,6 +64,8 @@
 | R14 | Audit log tak mencakup aksi sensitif (adjustment stok, ubah harga, impersonate) | M | Sedang | 🟠 | Audit wajib pada aksi kritis; `wks_core_audit_logs` + `wks_price_histories` | Termitigasi |
 | R15 | Upload foto (LKM) tak tervalidasi (tipe/ukuran/malware) | M | Sedang | 🟠 | Validasi mime/size; storage privat; nama acak | Terbuka |
 | R45 | **Pengeluaran sparepart tanpa review** — mekanik keluarkan part tanpa persetujuan / setujui sendiri | M | Tinggi | 🟠 | Bon `wks_inv_part_issues` ber-status; **SoD `requested_by ≠ reviewed_by`**; hanya `approved` bisa di-issue; policy per peran (Mekanik usul, ServiceAdvisor review, Gudang issue) | Termitigasi |
+| R46 | **Kebocoran data antar-supplier di portal** — supplier lihat PO/SJ supplier lain | M | Tinggi | 🔴 | Scope wajib `supplier_id` (+ company) di semua query panel `/vendor`; policy default-deny; test isolasi supplier (mirip R1) | Terbuka |
+| R47 | **Surface eksternal portal supplier** — akun supplier disusupi/abuse (brute force, enumerasi PO) | M | Tinggi | 🟠 | Akun undangan saja (tak open signup); 2FA opsional; rate-limit; audit login; verifikasi email; panel terpisah dari internal | Terbuka |
 
 ### D. Integrasi ControlHub HRD
 
@@ -123,6 +128,7 @@
 | G13 | UOM | Konversi satuan beli↔simpan (box/pcs/liter) | **Diputuskan: dukung konversi** (R37) — `wks_inv_part_uoms` dirancang | Implementasi di `StockService` saat scaffold Inventory |
 | G14 | Kebijakan stok negatif | Boleh/tidaknya `out` melebihi saldo | **Diputuskan: izinkan + alert** (R38/R41) — `wks_inv_stock_alerts` dirancang | Implementasi alert+notifikasi (tergantung G3) |
 | G15 | Job stok | Snapshot harian + retensi/pruning anchor (§7c DATABASE) | Dirancang, belum diimplementasi | Scheduler (Laravel) snapshot + prune; idempotent |
+| G16 | Portal Supplier | Panel `/vendor` (login supplier, daftar PO, register SJ masuk) | Skema dirancang (`wks_po_supplier_deliveries`, `users.supplier_id`); UI/auth **fase berikutnya** | Bangun panel Filament + guard + scope `supplier_id` + test isolasi (R46/R47) saat fase aktif |
 
 ---
 
