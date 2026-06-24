@@ -100,8 +100,8 @@ Barang datang → SERAH TERIMA (GRN, WAJIB pilih PO)  🔁 GRN: draft
    Tally Sheet (bongkar) → counted_qty per item & kondisi → isi qty_received
         │ posting
         ▼                            🔁 GRN: posted  | PO: partial/received
-   ├─ item PART → ⚙️ StockService:
-   │     stock_movement (in, condition, unit_cost, location_id) → qty_on_hand↑ → WAC
+   ├─ item PART → ⚙️ StockService (konversi UOM → dasar via uom_factor):
+   │     stock_movement (in, condition, unit_cost base, location_id) → qty_on_hand↑ → WAC
    └─ item BAN  → buat unit wks_tyre_tyres per serial (in_stock) + tyre_movements (in)
         │ semua item diterima
         ▼                            🔁 PO: closed
@@ -163,7 +163,8 @@ LKM → Work Order                               🔁 WO: queued
   → mekanik kerjakan; catat jam kerja
   → PEMAKAIAN part → ⚙️ StockService:
         stock_movement (type=out, unit_cost=avg_cost) → qty_on_hand↓, reserved↓
-        → wo_item.unit_cost diisi dari avg_cost (HPP)
+        → bila qty_on_hand < 0 → tidak diblokir; buat stock_alert (negative_stock) + notifikasi
+        → wo_item.unit_cost diisi dari avg_cost (HPP; beku bila saldo ≤ 0)
   → PASANG/ROTASI ban → ⚙️ TyreService (lihat #8); wo_item ban dgn unit_cost
   → QC                                          🔁 WO: qc
   → selesai → hitung total_cost (Σ line_cost)   🔁 WO: done

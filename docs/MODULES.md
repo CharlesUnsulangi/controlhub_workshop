@@ -194,6 +194,10 @@ pergerakan, valuasi, opname, serta dokumen serah terima & surat jalan.
   gudang bisa dikhususkan `condition_scope=new/used` (gudang part baru vs bekas).
   Part bekas masuk dari **teardown/copotan** (movement `ref=teardown`, bukan PO).
 - **Pergerakan stok** = SATU-SATUNYA cara stok berubah (in/out/transfer/adjustment), reservasi WO.
+- **Konversi UOM** — beli per *box*, simpan per *pcs*; satuan alternatif + factor per SKU
+  (`wks_inv_part_uoms`); stok & WAC selalu di **UOM dasar**, dokumen snapshot `uom_factor`.
+- **Stok negatif: diizinkan + alert** — `out` melebihi saldo tetap diproses, lalu buat
+  `wks_inv_stock_alerts` + notifikasi ke Gudang/Admin (juga di bawah min/reorder).
 - **Stock opname** → adjustment; kartu stok & **valuasi WAC**; peringatan stok kritis & slow-moving.
 - **Serah Terima dari supplier** — lihat modul Purchasing (§7), **wajib referensi PO** + tally.
 - **Surat Jalan (barang keluar) + Tally Sheet** — §8b.
@@ -202,6 +206,8 @@ pergerakan, valuasi, opname, serta dokumen serah terima & surat jalan.
 **Tabel** (dengan `company_id`)
 - `wks_inv_spare_parts` — **sku** (internal), name, primary_make, superseded_by_id, …
 - `wks_inv_part_numbers` — spare_part_id, ref_type(oem/aftermarket), brand, part_no, is_primary
+- `wks_inv_part_uoms` — spare_part_id, uom_id, **factor** (konversi ke UOM dasar), is_purchase_default, barcode
+- `wks_inv_stock_alerts` — alert stok negatif/di bawah ambang + status + notifikasi
 - `wks_inv_stock_items` — saldo **fisik** per rak: spare_part_id, warehouse_id, location_id, **condition**, qty_on_hand, qty_reserved
 - `wks_inv_stock_values` — saldo **valuasi/WAC** per gudang: spare_part_id, warehouse_id, condition, qty_on_hand, **avg_cost**, total_value, reorder override
 - `wks_inv_stock_movements` — ledger append-only: **condition**, type, **qty_in/qty_out** (net_qty generated), ref_type/ref_id, unit_cost

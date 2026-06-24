@@ -6,7 +6,8 @@
 >
 > **v0.2 (2026-06-25):** review modul Gudang Sparepart → desain ledger stok dirombak
 > (saldo fisik vs valuasi dipisah, `qty_in/qty_out`, snapshot saldo harian). Tambah
-> R33–R40, G13–G15.
+> R33–R41, G13–G15. Keputusan: **konversi UOM didukung** (R37/G13) & **stok negatif
+> diizinkan + alert** (R38/R41/G14).
 
 ## Cara Baca
 
@@ -39,7 +40,8 @@
 | R33 | **`avg_cost` sumber ganda** — dulu di `stock_items` (per lokasi) & `spare_parts` (per SKU) → drift WAC | M | Tinggi | 🔴 | **Satu sumber kebenaran**: WAC hanya di `wks_inv_stock_values` (grain warehouse+condition); `stock_items` fisik-saja; `spare_parts.last_cost` cache tampilan | Termitigasi |
 | R34 | **Baris saldo duplikat** — `unique(...,location_id,...)` dgn `location_id` NULL dianggap distinct di PG → agregasi stok rusak | M | Tinggi | 🔴 | `UNIQUE NULLS NOT DISTINCT` (PG17) atau lokasi sentinel; berlaku juga di snapshot fisik | Termitigasi |
 | R35 | **Opname tak bisa rekonsiliasi per-kondisi** — `opname_items` tanpa `condition` (stok dilacak per new/used/rebuilt) | M | Tinggi | 🔴 | Tambah kolom `condition` (wajib) di `opname_items`; adjustment movement bawa condition | Termitigasi |
-| R38 | **Stok negatif / over-reserve** — `out` melebihi saldo; `qty_reserved > qty_on_hand` | M | Sedang | 🟠 | CHECK `qty_reserved <= qty_on_hand`; **kebijakan stok negatif belum final** (tolak vs izinkan+alert) | Terbuka |
+| R38 | **Stok negatif / over-reserve** — `out` melebihi saldo; `qty_reserved > qty_on_hand` | M | Sedang | 🟠 | **Kebijakan: izinkan + alert** (tak blokir); `wks_inv_stock_alerts` (negative_stock) + notifikasi Gudang/Admin; tanpa CHECK keras | Termitigasi |
+| R41 | **WAC rusak saat saldo ≤ 0** — pembagian qty ≤ 0 (akibat stok negatif diizinkan) | M | Sedang | 🟠 | **Bekukan `avg_cost`** (nilai terakhir) selama qty ≤ 0; hitung ulang saat qty positif; `out` saat negatif pakai WAC beku | Termitigasi |
 | R39 | **Double-allocation Surat Jalan** — stok tak di-reserve antara DO draft→delivered | M | Sedang | 🟠 | Reserve `qty_reserved` saat DO dibuat; lepas saat posting/cancel (sejajar reservasi WO) | Terbuka |
 | R40 | **Snapshot historis hilang** — pruning harian menghapus anchor → query stok tanggal lama harus scan jauh | L | Sedang | 🟡 | `is_anchor` (akhir bulan) permanen, hanya snapshot harian non-anchor dipangkas | Termitigasi |
 | R8 | Reservasi part menggantung saat WO batal (`qty_reserved` tak dilepas) | M | Sedang | 🟠 | Lifecycle reservasi eksplisit; job pembersih; event saat WO cancel | Terbuka |
@@ -72,7 +74,7 @@
 | R20 | SKU cross-ref salah resolve (nomor part sama beda brand) | M | Sedang | 🟠 | `unique(company_id, brand, part_no)`; UI pencarian jelas (tampilkan brand+SKU) | Termitigasi |
 | R21 | Supersession part: stok lama vs baru tak ter-mapping | M | Sedang | 🟠 | Prosedur supersession (`superseded_by_id` + alih stok) | Terbuka |
 | R36 | **Reorder point tak bisa per-gudang** — dulu hanya di `spare_parts` (company-wide) | M | Sedang | 🟠 | Override `reorder_point`/`min_qty`/`max_qty` di `stock_values` (per gudang); null → default SKU | Termitigasi |
-| R37 | **Tak ada konversi UOM** — beli per box, simpan per pcs → qty/biaya beda satuan | M | Sedang | 🟠 | Putuskan: kunci 1 UOM/SKU, atau faktor konversi purchase_uom→stock_uom | Terbuka |
+| R37 | **Tak ada konversi UOM** — beli per box, simpan per pcs → qty/biaya beda satuan | M | Sedang | 🟠 | **Dukung konversi**: `wks_inv_part_uoms` (factor per SKU); UOM dasar utk stok/WAC; dokumen snapshot `uom_factor`; konversi di `StockService` | Termitigasi |
 | R22 | **Posisi ban berbeda per tipe truk** (jumlah/axle beda) | M | Sedang | 🟠 | Template posisi per `truck_type` (mis. 4x2, 6x4) | Terbuka |
 | R23 | Fitur jual dormant: logika invoice/harga jual belum dirancang detail | M | Sedang | 🟡 | Feature-flag bersih; rancang detail saat diaktifkan; kolom nullable siap | Diterima |
 
@@ -111,8 +113,8 @@
 | G10 | Approval | Ambang & alur approval PO | Disebut, belum detail | Aturan approval (nilai/peran) |
 | G11 | Scaffold | Laravel 13 + PHP 8.4 + Filament v5 + PostgreSQL | Stack terkunci, belum di-scaffold | Langkah berikutnya |
 | G12 | Kontrak HRD | Spesifikasi API (endpoint, auth, payload) | Belum disepakati | Koordinasi tim HRD; dokumen kontrak |
-| G13 | UOM | Konversi satuan beli↔simpan (box/pcs/liter) | Belum diputuskan (R37) | Kunci 1 UOM/SKU atau tabel konversi sebelum scaffold Inventory |
-| G14 | Kebijakan stok negatif | Boleh/tidaknya `out` melebihi saldo | Belum diputuskan (R38) | Tetapkan policy + enforcement di `StockService` |
+| G13 | UOM | Konversi satuan beli↔simpan (box/pcs/liter) | **Diputuskan: dukung konversi** (R37) — `wks_inv_part_uoms` dirancang | Implementasi di `StockService` saat scaffold Inventory |
+| G14 | Kebijakan stok negatif | Boleh/tidaknya `out` melebihi saldo | **Diputuskan: izinkan + alert** (R38/R41) — `wks_inv_stock_alerts` dirancang | Implementasi alert+notifikasi (tergantung G3) |
 | G15 | Job stok | Snapshot harian + retensi/pruning anchor (§7c DATABASE) | Dirancang, belum diimplementasi | Scheduler (Laravel) snapshot + prune; idempotent |
 
 ---

@@ -260,7 +260,7 @@ Daftar enum terpusat ada di **§12**.
 | primary_make | varchar(30) | yes | merek kendaraan utama (Hino/Isuzu/universal) — untuk filter |
 | superseded_by_id | bigint | yes | FK self — SKU pengganti (penggantian part) |
 | category_id | bigint | yes | FK categories (type=part) |
-| uom_id | bigint | yes | FK uoms |
+| uom_id | bigint | yes | FK uoms — **UOM dasar/stok (kanonik)**; stok & WAC SELALU di satuan ini (mis. pcs) |
 | min_qty | decimal(15,3) | no | default 0 |
 | max_qty | decimal(15,3) | yes | |
 | reorder_point | decimal(15,3) | no | default 0 |
@@ -296,6 +296,24 @@ Daftar enum terpusat ada di **§12**.
 > Contoh satu SKU: `(oem, Hino, 23300-78010, primary)`, `(oem, Isuzu, 8-97xxxxxx)`,
 > `(aftermarket, Sakura, FC-1501)`. Pencarian by `part_no` → resolve ke `spare_part_id`.
 
+### wks_inv_part_uoms  *(satuan alternatif per SKU — konversi box↔pcs)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| company_id | bigint | no | FK |
+| spare_part_id | bigint | no | FK |
+| uom_id | bigint | no | FK uoms — satuan alternatif (mis. box, dus) |
+| factor | decimal(15,6) | no | **1 satuan ini = `factor` UOM dasar** (mis. 1 box = 12 pcs) |
+| is_purchase_default | bool | no | default false — satuan default saat buat PO |
+| barcode | varchar(40) | yes | barcode kemasan (scan box) |
+| note | varchar(255) | yes | |
+| timestamps | | | **unique(company_id, spare_part_id, uom_id)** |
+
+> UOM dasar (`spare_parts.uom_id`, mis. pcs) **tidak** masuk tabel ini (factor-nya implisit 1).
+> Dokumen beli/terima/keluar mencatat satuan + **`uom_factor` ter-snapshot** di barisnya;
+> `StockService` mengonversi ke UOM dasar sebelum posting (qty_base = qty × factor,
+> unit_cost_base = unit_price ÷ factor). Stok & WAC selalu UOM dasar.
+
 ### wks_inv_stock_items  *(saldo FISIK live, per rak/bin — agregat dari movements)*
 | Kolom | Tipe | Null | Keterangan |
 |---|---|---|---|
@@ -306,7 +324,7 @@ Daftar enum terpusat ada di **§12**.
 | location_id | bigint | yes | FK locations (rak/bin) |
 | condition | varchar(10) | no | enum part_condition (new/used/rebuilt); default `new` |
 | qty_on_hand | decimal(15,3) | no | default 0 |
-| qty_reserved | decimal(15,3) | no | default 0 — **CHECK `qty_reserved <= qty_on_hand`** |
+| qty_reserved | decimal(15,3) | no | default 0 — TANPA CHECK keras (stok negatif diizinkan); over-reserve → alert |
 | timestamps | | | **unique NULLS NOT DISTINCT (spare_part_id, warehouse_id, location_id, condition)** |
 
 > **Saldo fisik saja, tanpa biaya.** Jawab "barang ada di rak mana, berapa" secara O(1).
@@ -375,6 +393,30 @@ Daftar enum terpusat ada di **§12**.
 
 > `condition` **wajib**: stok dilacak per new/used/rebuilt, jadi hitung fisik & adjustment
 > (movement) harus menyebut kondisi — tanpa ini saldo per-kondisi tak bisa direkonsiliasi.
+
+### wks_inv_stock_alerts  *(peringatan stok — negatif / di bawah ambang)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| company_id | bigint | no | FK |
+| branch_id | bigint | yes | FK |
+| spare_part_id | bigint | no | FK |
+| warehouse_id | bigint | no | FK |
+| condition | varchar(10) | no | part_condition |
+| alert_type | varchar(20) | no | enum stock_alert_type (negative_stock/below_min/below_reorder) |
+| qty_after | decimal(15,3) | no | saldo setelah mutasi pemicu |
+| threshold | decimal(15,3) | yes | ambang yang dilanggar (0 untuk negatif; reorder_point/min_qty) |
+| movement_id | bigint | yes | FK stock_movements pemicu (telusur) |
+| status | varchar(12) | no | enum alert_status (open/acknowledged/resolved); default `open` |
+| acknowledged_by | bigint | yes | FK users |
+| acknowledged_at | timestamptz | yes | |
+| created_at | timestamptz | no | index(company_id, status, spare_part_id) |
+
+> Dibuat oleh `StockService` saat mutasi membuat saldo **< 0** (`negative_stock`) atau turun
+> di bawah `min_qty`/`reorder_point`. **Tidak memblokir** transaksi (kebijakan: izinkan +
+> alert). Memicu notifikasi in-app (Filament) ke peran Gudang/Admin; channel WA/email
+> menyusul via modul Notifikasi (G3). De-dup: hindari alert ganda saat masih `open` untuk
+> kombinasi (part, warehouse, condition, alert_type) yang sama.
 
 ---
 
@@ -447,8 +489,12 @@ Daftar enum terpusat ada di **§12**.
 | approved_at | timestamptz | yes | |
 | timestamps | | | |
 
-### wks_po_order_items  *(harga & PPN ter-snapshot)*
-| id · po_id (FK) · item_type `varchar(15)` (spare_part/tyre_product) · item_id · qty `decimal(15,3)` · unit_price `decimal(15,2)` · tax_type · tax_rate · qty_received `decimal(15,3)` default 0 · line_total `decimal(15,2)` |
+### wks_po_order_items  *(harga, PPN & UOM ter-snapshot)*
+| id · po_id (FK) · item_type `varchar(15)` (spare_part/tyre_product) · item_id · uom_id (FK, null=UOM dasar) · uom_factor `decimal(15,6)` default 1 · qty `decimal(15,3)` · unit_price `decimal(15,2)` · tax_type · tax_rate · qty_received `decimal(15,3)` default 0 · line_total `decimal(15,2)` |
+
+> `qty`/`unit_price` dalam **satuan dokumen** (`uom_id`); `uom_factor` di-snapshot dari
+> `wks_inv_part_uoms` saat baris dibuat. Base: qty_base = qty × factor, unit_cost_base =
+> unit_price ÷ factor (dipakai stok & WAC). `qty_received` dalam satuan dokumen yang sama.
 
 ### wks_po_goods_receipts (Serah Terima / GRN — **WAJIB ref PO**)
 | Kolom | Tipe | Null | Keterangan |
@@ -479,9 +525,11 @@ Daftar enum terpusat ada di **§12**.
 | item_id | bigint | no | spare_part_id (SKU) atau tyre_product_id |
 | part_number_id | bigint | yes | FK part_numbers — brand/nomor yang nyata diterima (telusur) |
 | condition | varchar(10) | no | part_condition; default `new` |
-| qty_doc | decimal(15,3) | no | qty sesuai PO/surat jalan |
-| qty_received | decimal(15,3) | no | qty diterima nyata (hasil tally) |
-| unit_cost | decimal(15,2) | no | dasar valuasi stok |
+| uom_id | bigint | yes | FK uoms (null = UOM dasar) — satuan dokumen |
+| uom_factor | decimal(15,6) | no | default 1 — snapshot konversi ke UOM dasar |
+| qty_doc | decimal(15,3) | no | qty sesuai PO/surat jalan (satuan dokumen) |
+| qty_received | decimal(15,3) | no | qty diterima nyata/hasil tally (satuan dokumen) |
+| unit_cost | decimal(15,2) | no | per satuan dokumen; base = unit_cost ÷ uom_factor (dasar WAC) |
 | location_id | bigint | yes | FK locations (rak penyimpanan) |
 | tyre_serials | jsonb | yes | daftar serial bila item ban → buat unit di `wks_tyre_tyres` |
 
@@ -518,7 +566,7 @@ Daftar enum terpusat ada di **§12**.
 | timestamps | | | |
 
 ### wks_inv_delivery_order_items
-| id · delivery_order_id (FK) · spare_part_id (FK) · condition `varchar(10)` (part_condition) · qty `decimal(15,3)` · uom_id (FK null) · location_id (FK null, asal) · note |
+| id · delivery_order_id (FK) · spare_part_id (FK) · condition `varchar(10)` (part_condition) · uom_id (FK null=dasar) · uom_factor `decimal(15,6)` default 1 · qty `decimal(15,3)` (satuan dokumen) · location_id (FK null, asal) · note |
 
 > Surat Jalan barang ≠ surat jalan unit truk (`wks_lkm_gateouts.surat_jalan_no`).
 > Posting DO → `wks_inv_stock_movements` (out / transfer) sesuai `do_type`.
@@ -799,6 +847,8 @@ svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 | do_status | draft, in_transit, delivered, cancelled |
 | tally_source | delivery_order, goods_receipt |
 | tally_status | draft, completed |
+| stock_alert_type | negative_stock, below_min, below_reorder |
+| alert_status | open, acknowledged, resolved |
 | tax_type | exclusive, inclusive, non_pkp |
 | price_item_type | spare_part, tyre_product |
 | price_source | manual, bulk, import |
@@ -828,6 +878,17 @@ svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 - **WAC:** `avg_cost` baru = (nilai_lama + nilai_masuk) / (qty_lama + qty_masuk) saat GRN,
   di-hitung **per (part, warehouse, condition)** di `stock_values` dengan `SELECT … FOR UPDATE`
   (cegah race — R7). `spare_parts.last_cost` hanya cache tampilan, bukan dasar valuasi.
+- **UOM (konversi box↔pcs):** stok & WAC SELALU di **UOM dasar** (`spare_parts.uom_id`).
+  Satuan alternatif di `wks_inv_part_uoms` (`factor` = berapa UOM dasar per satuan itu).
+  Dokumen (PO/GRN/DO) menyimpan `uom_id` + `uom_factor` ter-snapshot; `StockService`
+  mengonversi ke base saat posting (`qty_base = qty × factor`, `unit_cost_base = unit_cost ÷ factor`).
+  Movement & saldo selalu base. Validasi: `factor > 0`.
+- **Kebijakan stok negatif: IZINKAN + ALERT** (bukan blokir). `StockService` tetap memproses
+  `out` walau `qty_on_hand` jadi < 0, lalu buat `wks_inv_stock_alerts` (`negative_stock`) +
+  notifikasi in-app ke Gudang/Admin. Juga alert saat saldo turun di bawah `min_qty`/`reorder_point`.
+- **WAC saat saldo ≤ 0:** jangan bagi dengan qty ≤ 0 — **bekukan `avg_cost`** (pakai nilai
+  terakhir) selama `qty_on_hand <= 0`; saat stok masuk lagi & qty positif, WAC dihitung ulang
+  normal. `out` saat negatif memakai `avg_cost` beku sebagai HPP.
 - **Snapshot harga:** `po_order_items.unit_price`, `wo_items.unit_cost` di-copy saat dibuat;
   perubahan master/price-list tidak mengubah dokumen lama.
 - **Polimorfik** (`item_type`+`item_id`, `ref_type`+`ref_id`): pakai cast/relasi morph
