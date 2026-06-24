@@ -376,7 +376,8 @@ Daftar enum terpusat ada di **§12**.
 | note | varchar(255) | yes | |
 | moved_at | timestamptz | no | |
 | created_by | bigint | yes | FK users |
-| created_at | timestamptz | no | index(company_id, spare_part_id, warehouse_id, moved_at) |
+| shift_session_id | bigint | yes | FK shift_sessions — sesi kerja operator saat mutasi (akuntabilitas) |
+| created_at | timestamptz | no | index(company_id, spare_part_id, warehouse_id, moved_at) · index(shift_session_id) |
 
 > **append-only** (tidak pernah di-UPDATE). **CHECK** tepat satu arah:
 > `(qty_in > 0 AND qty_out = 0) OR (qty_out > 0 AND qty_in = 0)`. Kolom `qty_in`/`qty_out`
@@ -506,6 +507,58 @@ Daftar enum terpusat ada di **§12**.
 > Mengelompokkan banyak `core_returns` jadi satu lot scrap; saat lot dijual/dibuang →
 > `core_returns.disposition=scrapped/disposed` + `scrap_disposal_id` diisi. Pencatatan
 > pendapatan scrap penuh = **future** (selaras mode INTERNAL; lihat §0 MODULES).
+
+### wks_inv_shift_sessions  *(Sesi Kerja Gudang — Opening/Closing per operator)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| company_id | bigint | no | FK |
+| branch_id | bigint | no | FK |
+| warehouse_id | bigint | no | FK — gudang yang dijaga |
+| operator_id | bigint | no | FK users — operator gudang |
+| session_no | varchar(30) | no | **unique(company_id, session_no)** |
+| status | varchar(12) | no | enum shift_session_status (open/closed/force_closed); default `open` |
+| opened_at | timestamptz | no | mulai kerja (aksi **Buka Sesi**) |
+| closed_at | timestamptz | yes | selesai kerja (aksi **Tutup Sesi**) |
+| closed_by | bigint | yes | FK users — pengisi closing (operator / supervisor bila force) |
+| total_movements | int | no | default 0 — jumlah mutasi ter-tag (diisi saat closing) |
+| total_in_qty | decimal(15,3) | no | default 0 |
+| total_out_qty | decimal(15,3) | no | default 0 |
+| total_value_in | decimal(15,2) | no | default 0 |
+| total_value_out | decimal(15,2) | no | default 0 |
+| anomaly_count | int | no | default 0 — item dgn `diff_qty ≠ 0` (perubahan tak ter-tag) |
+| opening_note | varchar(255) | yes | |
+| closing_note | varchar(255) | yes | |
+| timestamps | | | **partial unique: satu sesi `open` per operator** `unique(operator_id) WHERE status='open'` · index(company_id, warehouse_id, status) |
+
+> **Wajib (blok):** operator gudang **tidak bisa** posting movement (issue/GRN/transfer/
+> adjustment/teardown/core) tanpa sesi `open` — `StockService` menolak & minta Buka Sesi.
+> Setiap movement-nya di-tag `shift_session_id`. **Closing:** ringkas movement ter-tag →
+> isi total_* + tulis saldo akhir (full) → **update snapshot gudang** (§7c). Operator lupa
+> tutup → supervisor **force_closed** / job akhir hari (closed_by=sistem). Override admin/
+> sistem (non-operator) di-audit.
+
+### wks_inv_shift_session_balances  *(snapshot SELURUH saldo gudang saat buka & tutup)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| session_id | bigint | no | FK shift_sessions |
+| spare_part_id | bigint | no | FK |
+| location_id | bigint | yes | FK locations |
+| condition | varchar(10) | no | part_condition |
+| opening_qty | decimal(15,3) | no | saldo saat **buka** |
+| opening_avg_cost | decimal(15,2) | no | WAC saat buka |
+| in_qty | decimal(15,3) | no | default 0 — Σ masuk **ter-tag sesi ini** |
+| out_qty | decimal(15,3) | no | default 0 — Σ keluar ter-tag sesi ini |
+| closing_qty | decimal(15,3) | yes | saldo saat **tutup** |
+| closing_avg_cost | decimal(15,2) | yes | WAC saat tutup |
+| diff_qty | decimal(15,3) | yes | `closing − (opening + in − out)`; **≠0 = anomali** (mutasi tak ter-tag / operator lain) |
+| | | | **unique(session_id, spare_part_id, location_id, condition)** |
+
+> Cakupan **seluruh saldo gudang** (semua SKU+kondisi+lokasi yang ada stok) di-snapshot saat
+> buka (opening_qty) & tutup (closing_qty). `in/out` = movement **ter-tag sesi** (akuntabilitas
+> operator). `diff_qty≠0` menandai gudang berubah di luar yang dicatat operator ini (mis.
+> operator lain di gudang sama, atau mutasi tak ter-tag) → naikkan `anomaly_count` & review.
 
 ---
 
@@ -977,6 +1030,7 @@ svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 | part_issue_status | draft, submitted, approved, rejected, partially_issued, issued, cancelled |
 | supplier_delivery_status | draft, submitted, received, cancelled |
 | supplier_delivery_source | portal, manual |
+| shift_session_status | open, closed, force_closed |
 | tax_type | exclusive, inclusive, non_pkp |
 | price_item_type | spare_part, tyre_product |
 | price_source | manual, bulk, import |
@@ -1017,6 +1071,11 @@ svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 - **WAC saat saldo ≤ 0:** jangan bagi dengan qty ≤ 0 — **bekukan `avg_cost`** (pakai nilai
   terakhir) selama `qty_on_hand <= 0`; saat stok masuk lagi & qty positif, WAC dihitung ulang
   normal. `out` saat negatif memakai `avg_cost` beku sebagai HPP.
+- **Sesi Kerja Gudang (Opening/Closing):** operator **Buka Sesi** sebelum kerja; `StockService`
+  **menolak** movement operator tanpa sesi `open` (wajib) & men-tag `shift_session_id`. **Tutup
+  Sesi** → ringkas movement ter-tag + snapshot **seluruh** saldo gudang (opening vs closing) →
+  update snapshot §7c. `diff_qty≠0` di `shift_session_balances` = perubahan tak ter-tag (anomali).
+  Satu sesi `open` per operator (partial unique). Lupa tutup → force-close supervisor/job.
 - **Core return (old-for-new):** part baru **non-consumable** dipasang di WO → **wajib** kembalikan
   part bekas rusak (`wks_inv_core_returns`, 1:1) sebagai bukti sebelum WO `done`. Core bekas
   **bukan stok layak-pakai** → tidak masuk `stock_movements`/`stock_values` (beda dari teardown/

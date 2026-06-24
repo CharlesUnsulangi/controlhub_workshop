@@ -211,6 +211,10 @@ pergerakan, valuasi, opname, serta dokumen serah terima & surat jalan.
   (`wks_inv_part_uoms`); stok & WAC selalu di **UOM dasar**, dokumen snapshot `uom_factor`.
 - **Stok negatif: diizinkan + alert** — `out` melebihi saldo tetap diproses, lalu buat
   `wks_inv_stock_alerts` + notifikasi ke Gudang/Admin (juga di bawah min/reorder).
+- **Sesi Kerja Gudang (Opening/Closing)** — operator **Buka Sesi** saat mulai kerja → semua
+  mutasinya ter-tag → **Tutup Sesi** dgn ringkasan + snapshot **seluruh** saldo gudang. Wajib:
+  tak bisa transaksi tanpa sesi terbuka (1 sesi/operator). Selisih awal-akhir di luar yang
+  dicatat = **anomali** (deteksi mutasi tak ter-tag).
 - **Stock opname** → adjustment; kartu stok & **valuasi WAC**; peringatan stok kritis & slow-moving.
 - **Serah Terima dari supplier** — lihat modul Purchasing (§7), **wajib referensi PO** + tally.
 - **Surat Jalan (barang keluar) + Tally Sheet** — §8b.
@@ -229,6 +233,7 @@ pergerakan, valuasi, opname, serta dokumen serah terima & surat jalan.
 - `wks_inv_part_issues`, `wks_inv_part_issue_items` — Bon Pengeluaran Sparepart (usul mekanik→review SO→keluar gudang); ref WO/LKM/truck; qty_requested/approved/issued
 - `wks_inv_stock_loc_snapshots`, `wks_inv_stock_val_snapshots` — snapshot saldo harian (anchor bulanan, dipangkas) untuk stok historis & kartu stok
 - `wks_inv_stock_opnames`, `wks_inv_stock_opname_items` (per **condition**)
+- `wks_inv_shift_sessions`, `wks_inv_shift_session_balances` — Sesi Kerja Gudang (opening/closing, snapshot saldo + anomali); movement di-tag `shift_session_id`
 
 **Service inti:** `StockService` — semua mutasi stok (per kondisi) dalam `DB::transaction()`.
 Dipakai juga oleh Purchasing (serah terima), Surat Jalan, dan Servis (pemakaian part).

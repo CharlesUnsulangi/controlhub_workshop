@@ -18,6 +18,7 @@ Daftar workflow:
 8. Siklus Hidup Ban (Tyre)
 8b. Penerimaan Part Bekas (Teardown / Copotan)
 8c. Core Return (Old-for-New) & Penjualan Scrap
+8d. Sesi Kerja Gudang (Opening / Closing)
 9. Stock Opname & Penyesuaian
 10. Transfer Stok Antar Gudang
 10b. Surat Jalan (Barang Keluar) + Tally Sheet
@@ -261,6 +262,33 @@ Akumulasi bekas → buat lot scrap
 ```
 ⚙️ Consumable (oli/filter/grease/gasket) **dikecualikan** dari core return.
 ⚙️ Tujuan utama: **bukti** part memang rusak (anti-fraud) → lalu dijual besi tua.
+
+---
+
+## 8d. Sesi Kerja Gudang (Opening / Closing)
+
+👤 Operator Gudang (tutup paksa: Supervisor/Admin) · 📄 `wks_inv_shift_sessions`/`_balances`, `wks_inv_stock_movements`
+
+```
+Mulai kerja → BUKA SESI (pilih gudang)              🔁 session: open
+   → snapshot SELURUH saldo gudang (opening_qty per SKU+kondisi+lokasi)
+   → 1 sesi open/operator; tanpa sesi → ⛔ transaksi gudang DITOLAK
+        │
+        ▼  (selama sesi)
+Semua mutasi operator (issue/GRN/transfer/adjustment/teardown/core)
+   → ⚙️ StockService tag shift_session_id ke tiap stock_movement
+        │
+        ▼
+Selesai kerja → TUTUP SESI                           🔁 session: closed
+   → ringkas movement ter-tag: total_movements, in/out qty & nilai
+   → snapshot saldo akhir (closing_qty); diff = closing − (opening + in − out)
+   → diff ≠ 0 → anomaly_count↑ (perubahan tak ter-tag / operator lain) → review
+   → ⚙️ update snapshot gudang (§7c)
+        │
+        └─ operator lupa tutup → Supervisor/Job akhir hari → force_closed
+```
+⚙️ Akuntabilitas presisi = movement ter-tag sesi; snapshot full = rekonsiliasi state gudang.
+⚙️ Bila gudang dipakai >1 operator, diff sesi mencakup aktivitas operator lain (wajar).
 
 ---
 

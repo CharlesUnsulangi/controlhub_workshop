@@ -94,6 +94,10 @@ Peran: Gudang, Admin · *(Mekanik: usul pengeluaran · ServiceAdvisor: review)*
    ├─ /app/inv/parts/create        + cross-ref nomor pabrikan (Hino/Isuzu) & brand
    ├─ /app/inv/parts/{id}          Detail: part-numbers, kartu stok (per kondisi)
    └─ /app/inv/parts/search        Cari by nomor pabrikan/brand → resolve ke SKU
+/app/inv/sessions                  Sesi Kerja Gudang (Opening/Closing) — buka/tutup per operator
+   ├─ /app/inv/sessions/open        Buka Sesi (snapshot saldo awal gudang)
+   ├─ /app/inv/sessions/{id}        Detail: ringkasan mutasi + saldo awal→akhir + anomali
+   └─ /app/inv/sessions/{id}/close  Tutup Sesi (snapshot saldo akhir + update gudang)
 /app/inv/stock                     Stok per gudang/lokasi rak & kondisi (baru/bekas)
    └─ filter: warehouse · rak · condition (new/used/rebuilt)
 /app/inv/locations                 Lokasi rak (zona/rak/bay/level/bin + barcode)

@@ -13,7 +13,8 @@
 > Gudang; `wks_inv_part_issues`, SoD; R45) tersambung WO→LKM→truck.
 > **Surat Jalan MASUK dari supplier** (`wks_po_supplier_deliveries`, per PO; GRN merujuk,
 > fallback manual) + **Portal Supplier** panel `/vendor` (akun `users.supplier_id`, fase
-> berikutnya; R46/R47, G16).
+> berikutnya; R46/R47, G16). **Sesi Kerja Gudang** Opening/Closing per operator
+> (`wks_inv_shift_sessions`; movement ter-tag, wajib sesi, snapshot full + anomali; R48/R49).
 
 ## Cara Baca
 
@@ -51,6 +52,8 @@
 | R39 | **Double-allocation Surat Jalan** — stok tak di-reserve antara DO draft→delivered | M | Sedang | 🟠 | Reserve `qty_reserved` saat DO dibuat; lepas saat posting/cancel (sejajar reservasi WO) | Terbuka |
 | R40 | **Snapshot historis hilang** — pruning harian menghapus anchor → query stok tanggal lama harus scan jauh | L | Sedang | 🟡 | `is_anchor` (akhir bulan) permanen, hanya snapshot harian non-anchor dipangkas | Termitigasi |
 | R8 | Reservasi part menggantung saat WO/bon batal (`qty_reserved` tak dilepas) | M | Sedang | 🟠 | Lifecycle reservasi eksplisit; lepas saat `part_issue` rejected/cancelled & WO cancel; job pembersih | Terbuka |
+| R48 | **Sesi gudang menggantung** — operator lupa Tutup Sesi → snapshot closing tak terbentuk, sesi open menumpuk | M | Sedang | 🟠 | Force-close oleh Supervisor; **job akhir hari** auto `force_closed`; partial unique 1 open/operator | Termitigasi |
+| R49 | **Mutasi tak ter-tag sesi** — gerakan stok lolos tanpa `shift_session_id` (akuntabilitas bocor) | M | Sedang | 🟠 | Enforcement **wajib** sesi di `StockService` (blok); override sistem/admin di-audit; `diff_qty` deteksi anomali | Termitigasi |
 | R9 | Snapshot harga gagal → biaya berubah retroaktif | L | Tinggi | 🟠 | Copy `unit_cost`/`unit_price` ke item saat create (sudah dirancang) | Termitigasi |
 | R10 | Valuasi **part bekas** subyektif (unit_cost taksiran) | M | Sedang | 🟠 | Kebijakan penilaian; approval; kategori cost used terpisah | Terbuka |
 | R11 | WAC vs FIFO belum final → koreksi mahal bila berubah setelah live | M | Sedang | 🟠 | Putuskan sekarang (default WAC, MODULES §14) | Terbuka |
