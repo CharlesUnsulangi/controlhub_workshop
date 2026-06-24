@@ -15,6 +15,8 @@
 > fallback manual) + **Portal Supplier** panel `/vendor` (akun `users.supplier_id`, fase
 > berikutnya; R46/R47, G16). **Sesi Kerja Gudang** Opening/Closing per operator
 > (`wks_inv_shift_sessions`; movement ter-tag, wajib sesi, snapshot full + anomali; R48/R49).
+> **Lapisan Notifikasi** (resolusi G3): `wks_adm_notification_rules`/`wks_adm_notifications`
+> (WA/email/in-app, dikonfigurasi di master); konsumen pertama = notif sesi >24 jam (R50, G17).
 
 ## Cara Baca
 
@@ -52,7 +54,8 @@
 | R39 | **Double-allocation Surat Jalan** — stok tak di-reserve antara DO draft→delivered | M | Sedang | 🟠 | Reserve `qty_reserved` saat DO dibuat; lepas saat posting/cancel (sejajar reservasi WO) | Terbuka |
 | R40 | **Snapshot historis hilang** — pruning harian menghapus anchor → query stok tanggal lama harus scan jauh | L | Sedang | 🟡 | `is_anchor` (akhir bulan) permanen, hanya snapshot harian non-anchor dipangkas | Termitigasi |
 | R8 | Reservasi part menggantung saat WO/bon batal (`qty_reserved` tak dilepas) | M | Sedang | 🟠 | Lifecycle reservasi eksplisit; lepas saat `part_issue` rejected/cancelled & WO cancel; job pembersih | Terbuka |
-| R48 | **Sesi gudang menggantung** — operator lupa Tutup Sesi → snapshot closing tak terbentuk, sesi open menumpuk | M | Sedang | 🟠 | Force-close oleh Supervisor; **job akhir hari** auto `force_closed`; partial unique 1 open/operator | Termitigasi |
+| R48 | **Sesi gudang menggantung** — operator lupa Tutup Sesi → snapshot closing tak terbentuk, sesi open menumpuk | M | Sedang | 🟠 | Notif **WA+email** bila >24 jam (rule dikonfigurasi di master, eskalasi); force-close Supervisor; **job akhir hari** auto `force_closed`; partial unique 1 open/operator | Termitigasi |
+| R50 | **Gateway WhatsApp gagal/biaya** — provider down, nomor diblokir, kuota/biaya, pesan tak sampai | M | Sedang | 🟠 | Outbox `wks_adm_notifications` (status/retry); fallback email; channel `database` selalu ada; abstraksi `WaGateway` (ganti provider); monitor gagal-kirim | Terbuka |
 | R49 | **Mutasi tak ter-tag sesi** — gerakan stok lolos tanpa `shift_session_id` (akuntabilitas bocor) | M | Sedang | 🟠 | Enforcement **wajib** sesi di `StockService` (blok); override sistem/admin di-audit; `diff_qty` deteksi anomali | Termitigasi |
 | R9 | Snapshot harga gagal → biaya berubah retroaktif | L | Tinggi | 🟠 | Copy `unit_cost`/`unit_price` ke item saat create (sudah dirancang) | Termitigasi |
 | R10 | Valuasi **part bekas** subyektif (unit_cost taksiran) | M | Sedang | 🟠 | Kebijakan penilaian; approval; kategori cost used terpisah | Terbuka |
@@ -118,7 +121,8 @@
 |---|---|---|---|---|
 | G1 | Keputusan desain | WAC vs FIFO, feature-flag plan, multi-currency, pajak lain, mechanics scope, cost-per-brand | Terbuka (MODULES §14) | Finalkan sebelum scaffold |
 | G2 | Autentikasi | Login, kebijakan sandi, 2FA, sesi | Belum dirancang detail | Rancang modul Auth (Core/Admin) |
-| G3 | Notifikasi | Reminder PM/STNK/KIR, WA/email | Disebut di roadmap, tak ada skema | Tabel `notifications` + channel + scheduler |
+| G3 | Notifikasi | Reminder PM/STNK/KIR, WA/email, stok, sesi gudang | **Skema dirancang**: `wks_adm_notification_rules` + `wks_adm_notifications` + channel (mail/WA/db) + scheduler | Implementasi job + `WaGateway`; **pilih provider WA** (G17) |
+| G17 | Provider WA | Penyedia WhatsApp gateway (Fonnte/Wablas/Meta Cloud API/dll.) | Belum dipilih (abstraksi `WaGateway` siap; config `integrations.php`) | Pilih provider + kredensial saat fase notifikasi aktif (R50) |
 | G4 | Media/file | Foto inspeksi LKM, lampiran | Belum ada strategi storage | Tentukan disk (S3/local), tabel attachment |
 | G5 | Reporting/BI | Laporan lintas modul | Daftar laporan ada, mekanisme belum | Tentukan read-model/query layer |
 | G6 | Migrasi data | Import master (part Hino/Isuzu, truk) | Belum ada | Buat importer + template |

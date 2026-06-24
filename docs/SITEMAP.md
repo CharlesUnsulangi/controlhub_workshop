@@ -191,6 +191,8 @@ Peran: Owner, Admin
 /app/admin/company                 Profil company (logo, NPWP, kontak)
 /app/admin/settings                Pengaturan: pajak/PPN, jam operasional
 /app/admin/document-sequences      Penomoran dokumen (LKM/WO/PO/Invoice)
+/app/admin/notifications           Aturan Notifikasi (event → channel WA/email/in-app, penerima, ambang/eskalasi)
+   └─ /app/admin/notifications/log  Riwayat kirim (outbox: terkirim/gagal)
 ```
 
 ### B.9 Laporan (lintas modul)  (`/app/reports`)

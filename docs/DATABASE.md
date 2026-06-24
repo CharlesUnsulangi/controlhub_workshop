@@ -108,6 +108,45 @@ Daftar enum terpusat ada di **§12**.
 ### wks_adm_company_settings
 | id · company_id (FK) · group `varchar(50)` · key `varchar(80)` · value `jsonb` · timestamps · **unique(company_id, group, key)** |
 
+### wks_adm_notification_rules  *(aturan notifikasi — dikonfigurasi di master per company)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| company_id | bigint | no | FK |
+| event_key | varchar(40) | no | `shift.session_overdue`, `stock.alert`, `pm.due`, `truck.doc_expiry`, … |
+| name | varchar(100) | no | label aturan |
+| is_active | bool | no | default true |
+| channels | jsonb | no | channel default, mis. `["email","whatsapp","database"]` |
+| recipients | jsonb | no | `{"actor":true,"roles":["Gudang","Admin"],"user_ids":[...]}` (actor=user terkait, mis. operator) |
+| escalations | jsonb | yes | tahap: `[{"after_hours":24,"recipients":{...},"channels":[...]},{"after_hours":48,...}]` |
+| repeat_hours | smallint | yes | ulang tiap N jam sampai selesai (null = tidak) |
+| template | jsonb | yes | `{"subject":"...","body":"..."}` + placeholder (mis. `{operator}`,`{warehouse}`,`{hours}`) |
+| timestamps | | | **unique(company_id, event_key)** |
+
+### wks_adm_notifications  *(outbox/log — sekaligus pencegah kirim ganda)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| company_id | bigint | no | FK |
+| event_key | varchar(40) | no | dari rule |
+| ref_type | varchar(50) | yes | polimorfik (shift_session, stock_alert, …) |
+| ref_id | bigint | yes | |
+| step | smallint | yes | tahap eskalasi (dedup: 1 kirim per channel per step per ref) |
+| channel | varchar(12) | no | enum notification_channel (database/email/whatsapp) |
+| recipient_user_id | bigint | yes | FK users |
+| recipient_address | varchar(150) | yes | email / no. WA |
+| subject | varchar(200) | yes | |
+| body | text | no | |
+| status | varchar(12) | no | enum notification_status (pending/sent/failed); default `pending` |
+| sent_at | timestamptz | yes | |
+| error | varchar(255) | yes | |
+| created_at | timestamptz | no | index(company_id, event_key, ref_type, ref_id, step) · index(company_id, status) |
+
+> **Mekanik:** event memicu evaluasi `notification_rules` → render `template` → tulis baris
+> outbox per (penerima × channel) → channel `email` (Laravel Mail), `whatsapp` (gateway
+> `config/integrations.php` — pola sama `HrdGateway`), `database` (in-app Filament). Dedup via
+> `(event_key, ref, step, channel)`. Gagal kirim → `status=failed` + retry. Resolusi **G3**.
+
 ### wks_adm_document_sequences
 | Kolom | Tipe | Null | Keterangan |
 |---|---|---|---|
@@ -527,6 +566,8 @@ Daftar enum terpusat ada di **§12**.
 | total_value_in | decimal(15,2) | no | default 0 |
 | total_value_out | decimal(15,2) | no | default 0 |
 | anomaly_count | int | no | default 0 — item dgn `diff_qty ≠ 0` (perubahan tak ter-tag) |
+| overdue_notified_at | timestamptz | yes | kapan terakhir dinotifikasi belum-ditutup (anti-spam) |
+| overdue_notify_step | smallint | no | default 0 — tahap eskalasi notifikasi terakhir terkirim |
 | opening_note | varchar(255) | yes | |
 | closing_note | varchar(255) | yes | |
 | timestamps | | | **partial unique: satu sesi `open` per operator** `unique(operator_id) WHERE status='open'` · index(company_id, warehouse_id, status) |
@@ -537,6 +578,9 @@ Daftar enum terpusat ada di **§12**.
 > isi total_* + tulis saldo akhir (full) → **update snapshot gudang** (§7c). Operator lupa
 > tutup → supervisor **force_closed** / job akhir hari (closed_by=sistem). Override admin/
 > sistem (non-operator) di-audit.
+> **Belum ditutup >24 jam:** job terjadwal kirim **WA + email** (event `shift.session_overdue`)
+> sesuai `wks_adm_notification_rules` (penerima, ambang jam, eskalasi, ulang — **dikonfigurasi
+> di master**); `overdue_notify_step`/`overdue_notified_at` mencegah kirim ganda.
 
 ### wks_inv_shift_session_balances  *(snapshot SELURUH saldo gudang saat buka & tutup)*
 | Kolom | Tipe | Null | Keterangan |
@@ -1031,6 +1075,8 @@ svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 | supplier_delivery_status | draft, submitted, received, cancelled |
 | supplier_delivery_source | portal, manual |
 | shift_session_status | open, closed, force_closed |
+| notification_channel | database, email, whatsapp |
+| notification_status | pending, sent, failed |
 | tax_type | exclusive, inclusive, non_pkp |
 | price_item_type | spare_part, tyre_product |
 | price_source | manual, bulk, import |

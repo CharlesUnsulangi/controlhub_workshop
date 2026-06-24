@@ -107,13 +107,21 @@ lintas tenant + impersonate, audit log sistem, (opsional) plan/langganan & featu
 **Tujuan:** admin perusahaan mengatur user, hak akses (RBAC), dan pengaturan company.
 
 **Fitur:** manajemen user dalam company, Roles & Permissions per company, pengaturan
-company (pajak/PPN, penomoran dokumen, logo, jam operasional), pengelolaan **branch**.
+company (pajak/PPN, penomoran dokumen, logo, jam operasional), pengelolaan **branch**,
+**Notifikasi** (aturan WA/email/in-app yang dapat dikonfigurasi).
 
 **Tabel**
-- `users` — **tabel bawaan Laravel**, ditambah kolom `company_id` (nullable; null = super admin Core)
+- `users` — **tabel bawaan Laravel**, ditambah kolom `company_id` (nullable; null = super admin Core), `supplier_id` (portal)
 - `wks_adm_roles`, `wks_adm_permissions`, `wks_adm_role_user`, `wks_adm_permission_role`
 - `wks_adm_company_settings` — company_id, key, value (jsonb)
 - `wks_adm_document_sequences` — company_id, doc_type, prefix, next_number
+- `wks_adm_notification_rules` — aturan notifikasi per event (channel, penerima, ambang/eskalasi, ulang) — **dikonfigurasi di master**
+- `wks_adm_notifications` — outbox/log kirim (database/email/whatsapp) + status + dedup
+
+**Notifikasi (resolusi G3):** event (mis. `shift.session_overdue`, `stock.alert`, `pm.due`,
+`truck.doc_expiry`) → baca `notification_rules` → kirim via channel. **WhatsApp** lewat gateway
+`config/integrations.php` (`whatsapp.provider/base_url/token/sender/enabled`, pola `HrdGateway`),
+**email** via Laravel Mail, **in-app** via Filament. Dijalankan job terjadwal + event aplikasi.
 
 **Peran:** `Owner`, `Admin`.
 

@@ -285,10 +285,14 @@ Selesai kerja → TUTUP SESI                           🔁 session: closed
    → diff ≠ 0 → anomaly_count↑ (perubahan tak ter-tag / operator lain) → review
    → ⚙️ update snapshot gudang (§7c)
         │
+        ├─ belum ditutup >24 jam → ⚙️ Job terjadwal cek sesi open
+        │     → kirim WA + email (event shift.session_overdue) sesuai wks_adm_notification_rules
+        │     → penerima/ambang/eskalasi/ulang DIKONFIGURASI DI MASTER; tandai overdue_notify_step
         └─ operator lupa tutup → Supervisor/Job akhir hari → force_closed
 ```
 ⚙️ Akuntabilitas presisi = movement ter-tag sesi; snapshot full = rekonsiliasi state gudang.
 ⚙️ Bila gudang dipakai >1 operator, diff sesi mencakup aktivitas operator lain (wajar).
+⚙️ Notifikasi 24 jam reusable (lapisan Notifikasi modul Admin); WA via gateway, email via Mail.
 
 ---
 
