@@ -6,8 +6,9 @@
 >
 > **v0.2 (2026-06-25):** review modul Gudang Sparepart → desain ledger stok dirombak
 > (saldo fisik vs valuasi dipisah, `qty_in/qty_out`, snapshot saldo harian). Tambah
-> R33–R41, G13–G15. Keputusan: **konversi UOM didukung** (R37/G13) & **stok negatif
-> diizinkan + alert** (R38/R41/G14).
+> R33–R44, G13–G15. Keputusan: **konversi UOM didukung** (R37/G13), **stok negatif
+> diizinkan + alert** (R38/R41/G14), **core return wajib** untuk part non-consumable
+> (bukti rusak → scrap; R42–R44, tabel `wks_inv_core_returns`/`scrap_disposals`).
 
 ## Cara Baca
 
@@ -77,6 +78,9 @@
 | R37 | **Tak ada konversi UOM** — beli per box, simpan per pcs → qty/biaya beda satuan | M | Sedang | 🟠 | **Dukung konversi**: `wks_inv_part_uoms` (factor per SKU); UOM dasar utk stok/WAC; dokumen snapshot `uom_factor`; konversi di `StockService` | Termitigasi |
 | R22 | **Posisi ban berbeda per tipe truk** (jumlah/axle beda) | M | Sedang | 🟠 | Template posisi per `truck_type` (mis. 4x2, 6x4) | Terbuka |
 | R23 | Fitur jual dormant: logika invoice/harga jual belum dirancang detail | M | Sedang | 🟡 | Feature-flag bersih; rancang detail saat diaktifkan; kolom nullable siap | Diterima |
+| R42 | **Core return tak ditegakkan** → part baru keluar tanpa bukti bekas (fraud) | M | Tinggi | 🟠 | Gate tutup WO: non-consumable wajib `wks_inv_core_returns` 1:1 (qty cocok); `categories.is_consumable` | Termitigasi |
+| R43 | **Klasifikasi consumable salah** → part rusak penting tak diminta core, atau consumable malah diminta | M | Sedang | 🟠 | Tetapkan `is_consumable` per kategori saat setup master; review; override per-SKU bila perlu | Terbuka |
+| R44 | **Bukti core lemah** — tanpa foto/alasan, bukti rusak tak kuat; storage foto belum ada (G4) | M | Sedang | 🟠 | `failure_reason` wajib + `photo_path` (tergantung strategi media G4); retensi sebelum scrap | Terbuka |
 
 ### F. Operasional & Non-Fungsional
 

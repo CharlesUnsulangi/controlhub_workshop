@@ -17,6 +17,7 @@ Daftar workflow:
 7. Servis Berkala (PM)
 8. Siklus Hidup Ban (Tyre)
 8b. Penerimaan Part Bekas (Teardown / Copotan)
+8c. Core Return (Old-for-New) & Penjualan Scrap
 9. Stock Opname & Penyesuaian
 10. Transfer Stok Antar Gudang
 10b. Surat Jalan (Barang Keluar) + Tally Sheet
@@ -165,8 +166,12 @@ LKM → Work Order                               🔁 WO: queued
         stock_movement (type=out, unit_cost=avg_cost) → qty_on_hand↓, reserved↓
         → bila qty_on_hand < 0 → tidak diblokir; buat stock_alert (negative_stock) + notifikasi
         → wo_item.unit_cost diisi dari avg_cost (HPP; beku bila saldo ≤ 0)
+  → CORE RETURN (part baru non-consumable) → 📄 wks_inv_core_returns (1:1 wo_item)
+        bekas RUSAK kembali ke gudang (holding/scrap) + foto bukti + failure_reason
+        ⚠️ bukan stok layak-pakai (tak masuk stock_movements); telusur truck→LKM→WO
   → PASANG/ROTASI ban → ⚙️ TyreService (lihat #8); wo_item ban dgn unit_cost
   → QC                                          🔁 WO: qc
+  → ✋ gate: semua core non-consumable sudah kembali? belum → tak bisa done
   → selesai → hitung total_cost (Σ line_cost)   🔁 WO: done
   → unit diserahkan (gate-out LKM)              🔁 WO: delivered
   → update next PM (#7); masuk riwayat & laporan biaya per unit
@@ -224,6 +229,29 @@ Part bekas dari unit (lepasan saat WO / pembongkaran)
 ```
 ⚙️ Masuk **tanpa PO** (bukan pembelian). Stok used punya saldo & WAC terpisah dari new.
 ⚙️ Part used bisa dipakai kembali di WO (dipilih saat request part, kondisi=used).
+⚙️ Beda dari **Core Return** (#8c): teardown = part **layak pakai**; core return = part **rusak**.
+
+---
+
+## 8c. Core Return (Old-for-New) & Penjualan Scrap
+
+👤 Gudang, Mekanik · 📄 `wks_inv_core_returns`, `wks_inv_scrap_disposals`
+
+```
+WO pasang part baru non-consumable (categories.is_consumable=false)
+  → WAJIB kembalikan part bekas RUSAK   ⚠️ gate: WO tak bisa done tanpa ini
+  → /app/inv/core-return → input wo_item (1:1), qty (= qty baru), failure_reason, foto bukti
+        simpan di gudang/rak holding (warehouse_id, location_id)   🔁 core: pending→stored
+  → telusur asal otomatis: truck_id, lkm_id, wo_id (dari WO)
+  ⚠️ TIDAK masuk stock_movements/stock_values (bukan stok layak-pakai; assessed_value=nilai scrap)
+
+Akumulasi bekas → buat lot scrap
+  → /app/inv/scrap-disposal → pilih core_returns → set disposal_type (sold/discarded)
+  → core_returns.disposition=scrapped/disposed + scrap_disposal_id   🔁 core: released
+  → (pendapatan jual scrap = future)
+```
+⚙️ Consumable (oli/filter/grease/gasket) **dikecualikan** dari core return.
+⚙️ Tujuan utama: **bukti** part memang rusak (anti-fraud) → lalu dijual besi tua.
 
 ---
 

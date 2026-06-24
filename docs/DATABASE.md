@@ -241,7 +241,7 @@ Daftar enum terpusat ada di **§12**.
 | id · company_id (FK) · code `varchar(15)` · name `varchar(40)` · timestamps · **unique(company_id, code)** |
 
 ### wks_mst_categories
-| id · company_id (FK) · type `varchar(10)` (enum category_type: part/tyre) · name `varchar(80)` · parent_id (FK self, null) · timestamps · **unique(company_id, type, name)** |
+| id · company_id (FK) · type `varchar(10)` (enum category_type: part/tyre) · name `varchar(80)` · parent_id (FK self, null) · **is_consumable `bool` default false** (habis-pakai: oli/filter/grease → tak wajib core return) · timestamps · **unique(company_id, type, name)** |
 
 ### wks_mst_mechanics
 | id · company_id (FK) · branch_id (FK) · user_id (FK users, null) · code `varchar(20)` · name · skills `jsonb` · hourly_rate `decimal(15,2)` null · status `varchar(20)` (enum mechanic_status) · timestamps · deleted_at · **unique(company_id, code)** |
@@ -417,6 +417,44 @@ Daftar enum terpusat ada di **§12**.
 > alert). Memicu notifikasi in-app (Filament) ke peran Gudang/Admin; channel WA/email
 > menyusul via modul Notifikasi (G3). De-dup: hindari alert ganda saat masih `open` untuk
 > kombinasi (part, warehouse, condition, alert_type) yang sama.
+
+### wks_inv_core_returns  *(pengembalian part bekas RUSAK — bukti old-for-new → scrap)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| company_id | bigint | no | FK |
+| branch_id | bigint | no | FK |
+| return_no | varchar(30) | no | **unique(company_id, return_no)** |
+| wo_id | bigint | no | FK work_orders — job yang memasang part baru |
+| wo_item_id | bigint | no | FK work_order_items — baris pemasangan part baru (pemicu, **1:1**) |
+| truck_id | bigint | yes | FK trucks — telusur asal |
+| lkm_id | bigint | yes | FK lkm_entries — telusur asal |
+| spare_part_id | bigint | no | FK — SKU part bekas |
+| qty | decimal(15,3) | no | jumlah bekas dikembalikan (= qty part baru dipasang) |
+| failure_reason | varchar(255) | yes | bukti: kenapa part diganti (rusak/aus/patah) |
+| photo_path | varchar(255) | yes | foto bukti (storage privat — lihat G4) |
+| assessed_value | decimal(15,2) | no | default 0 — taksiran nilai scrap (bukan WAC stok) |
+| warehouse_id | bigint | no | FK — gudang penampung bekas |
+| location_id | bigint | yes | FK locations — **area holding/scrap** |
+| disposition | varchar(12) | no | enum core_disposition (held/scrapped/disposed); default `held` |
+| scrap_disposal_id | bigint | yes | FK scrap_disposals — bila masuk lot penjualan scrap |
+| received_by | bigint | yes | FK users (Gudang yang menerima bekas) |
+| status | varchar(12) | no | enum core_return_status (pending/stored/released); default `pending` |
+| note | varchar(255) | yes | |
+| timestamps | | | **unique(company_id, wo_item_id)** · index(company_id, spare_part_id) |
+
+> **Wajib** untuk part **non-consumable** (`categories.is_consumable=false`): WO tak boleh
+> `done` sebelum tiap baris pemasangan part baru non-consumable punya core return (qty cocok).
+> Consumable (oli/filter/grease) dikecualikan. **Tidak masuk `stock_movements`/`stock_values`**
+> (bukan stok layak-pakai → jangan kotori WAC); register bukti tersendiri. Telusur asal lengkap
+> (truck→LKM→WO→SKU). Nasib: ditahan sebagai bukti (`held`) → dijual scrap (`scrapped`).
+
+### wks_inv_scrap_disposals  *(lot penjualan/pembuangan scrap — ringan, opsional/future)*
+| id · company_id (FK) · branch_id (FK) · disposal_no `varchar(30)` **unique(company_id, disposal_no)** · disposal_type `varchar(12)` (enum: sold/discarded) · disposal_date `date` · buyer_name `varchar(150)` null · total_weight `decimal(15,3)` null · total_amount `decimal(15,2)` null *(hasil jual — future)* · note · created_by (FK users) · timestamps |
+
+> Mengelompokkan banyak `core_returns` jadi satu lot scrap; saat lot dijual/dibuang →
+> `core_returns.disposition=scrapped/disposed` + `scrap_disposal_id` diisi. Pencatatan
+> pendapatan scrap penuh = **future** (selaras mode INTERNAL; lihat §0 MODULES).
 
 ---
 
@@ -763,6 +801,10 @@ snapshot harian dibuat job tengah malam, dipangkas berkala, **baris akhir-bulan
 | line_cost | decimal(15,2) | no | qty × unit_cost |
 | line_price | decimal(15,2) | yes | *(future)* |
 
+> **Core return:** baris `item_type=spare_part` dgn kategori **non-consumable** wajib punya
+> `wks_inv_core_returns` (1:1, qty cocok) sebelum WO bisa `done` — bukti part lama rusak.
+> Consumable dikecualikan. Lihat §5.
+
 ### wks_svc_services *(katalog jasa)*
 | id · company_id (FK) · code `varchar(30)` · name · std_cost `decimal(15,2)` · std_price `decimal(15,2)` null *(future)* · est_hours `decimal(6,2)` · is_active · timestamps · **unique(company_id, code)** |
 
@@ -849,6 +891,9 @@ svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 | tally_status | draft, completed |
 | stock_alert_type | negative_stock, below_min, below_reorder |
 | alert_status | open, acknowledged, resolved |
+| core_disposition | held, scrapped, disposed |
+| core_return_status | pending, stored, released |
+| scrap_disposal_type | sold, discarded |
 | tax_type | exclusive, inclusive, non_pkp |
 | price_item_type | spare_part, tyre_product |
 | price_source | manual, bulk, import |
@@ -889,6 +934,11 @@ svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 - **WAC saat saldo ≤ 0:** jangan bagi dengan qty ≤ 0 — **bekukan `avg_cost`** (pakai nilai
   terakhir) selama `qty_on_hand <= 0`; saat stok masuk lagi & qty positif, WAC dihitung ulang
   normal. `out` saat negatif memakai `avg_cost` beku sebagai HPP.
+- **Core return (old-for-new):** part baru **non-consumable** dipasang di WO → **wajib** kembalikan
+  part bekas rusak (`wks_inv_core_returns`, 1:1) sebagai bukti sebelum WO `done`. Core bekas
+  **bukan stok layak-pakai** → tidak masuk `stock_movements`/`stock_values` (beda dari teardown/
+  copotan yang reusable); ditampung di area holding/scrap, lalu dijual scrap (`wks_inv_scrap_disposals`).
+  Telusur asal: truck→LKM→WO→SKU. Enforcement via `categories.is_consumable` + validasi tutup WO.
 - **Snapshot harga:** `po_order_items.unit_price`, `wo_items.unit_cost` di-copy saat dibuat;
   perubahan master/price-list tidak mengubah dokumen lama.
 - **Polimorfik** (`item_type`+`item_id`, `ref_type`+`ref_id`): pakai cast/relasi morph

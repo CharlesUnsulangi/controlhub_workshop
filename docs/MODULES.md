@@ -193,6 +193,9 @@ pergerakan, valuasi, opname, serta dokumen serah terima & surat jalan.
 - **Stok baru vs bekas** — dimensi `condition` (new/used/rebuilt); saldo & WAC terpisah;
   gudang bisa dikhususkan `condition_scope=new/used` (gudang part baru vs bekas).
   Part bekas masuk dari **teardown/copotan** (movement `ref=teardown`, bukan PO).
+- **Core return (old-for-new)** — pasang part baru **non-consumable** di WO → **wajib** kembalikan
+  part bekas RUSAK sebagai **bukti** (`wks_inv_core_returns`), ditahan lalu **dijual scrap**.
+  Beda dari teardown: core rusak **tidak** masuk stok layak-pakai. Telusur asal truck→LKM→WO.
 - **Pergerakan stok** = SATU-SATUNYA cara stok berubah (in/out/transfer/adjustment), reservasi WO.
 - **Konversi UOM** — beli per *box*, simpan per *pcs*; satuan alternatif + factor per SKU
   (`wks_inv_part_uoms`); stok & WAC selalu di **UOM dasar**, dokumen snapshot `uom_factor`.
@@ -208,6 +211,8 @@ pergerakan, valuasi, opname, serta dokumen serah terima & surat jalan.
 - `wks_inv_part_numbers` — spare_part_id, ref_type(oem/aftermarket), brand, part_no, is_primary
 - `wks_inv_part_uoms` — spare_part_id, uom_id, **factor** (konversi ke UOM dasar), is_purchase_default, barcode
 - `wks_inv_stock_alerts` — alert stok negatif/di bawah ambang + status + notifikasi
+- `wks_inv_core_returns` — register part bekas rusak (bukti old-for-new): wo_item (1:1), truck/lkm telusur, disposition held/scrapped
+- `wks_inv_scrap_disposals` — lot penjualan/pembuangan scrap *(ringan, future)*
 - `wks_inv_stock_items` — saldo **fisik** per rak: spare_part_id, warehouse_id, location_id, **condition**, qty_on_hand, qty_reserved
 - `wks_inv_stock_values` — saldo **valuasi/WAC** per gudang: spare_part_id, warehouse_id, condition, qty_on_hand, **avg_cost**, total_value, reorder override
 - `wks_inv_stock_movements` — ledger append-only: **condition**, type, **qty_in/qty_out** (net_qty generated), ref_type/ref_id, unit_cost
@@ -286,6 +291,9 @@ penugasan mekanik, **request part ke gudang** (reservasi/pemakaian via `StockSer
 pasang ban (via `TyreService`), catat jam kerja, status (*Antri → Menunggu Part →
 Dikerjakan → QC → Selesai → Diserahkan*), **servis berkala/PM** berbasis KM/jam/waktu +
 reminder, **rekap biaya per WO & per unit** (cost: part HPP + ban + jasa).
+**Core return wajib:** tiap pemasangan part baru **non-consumable** harus disertai
+pengembalian part bekas rusak (`wks_inv_core_returns`, §8) sebagai bukti — WO **tak bisa
+`done`** bila core belum kembali (qty cocok). Consumable (oli/filter/grease) dikecualikan.
 
 **Fitur (future/dormant):** harga jual, **Invoice & pembayaran** ke customer
 (termasuk konsolidasi armada). Tabel disiapkan, UI non-aktif via feature-flag.
