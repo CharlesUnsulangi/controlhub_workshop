@@ -210,21 +210,31 @@ Tiap unit punya jadwal PM (interval km / hours / days)
 
 ## 8. Siklus Hidup Ban (Tyre)
 
-👤 Gudang, Mekanik · 📄 `wks_tyre_tyres`/`products`/`movements`/`installations`/`inspections`/`retreads`
+👤 Gudang/GudangBan, Mekanik · 📄 `wks_tyre_*`, `wks_mst_axle_positions`, `wks_inv_shift_sessions`
+⚙️ Semua mutasi via **TyreService** (DB::transaction) — **wajib Sesi Kerja Gudang terpadu** (di-tag).
 
 ```
-Terima dari GRN (#4) → unit ban dibuat per serial   🔁 tyre: in_stock
-  → pasang ke truk (posisi FL/FR/RL1…, km_install)  🔁 tyre: installed
-        → wks_tyre_installations (removed_at=null)
-  → inspeksi berkala (tread_depth, pressure)         📄 tyre_inspections
-  → lepas (km_remove) → installation ditutup         🔁 tyre: removed
-        ├─ masih layak → kembali ke stok             🔁 tyre: in_stock
-        ├─ kirim vulkanisir → supplier                🔁 tyre: retreading
-        │     → terima kembali (retread_count↑)       🔁 tyre: in_stock
-        └─ tidak layak → scrap                        🔁 tyre: scrapped
+Terima dari GRN (#4) → unit ban dibuat per serial   🔁 tyre: in_stock  (movement receipt, acquired_cost)
+        → simpan di lokasi/bin (location_id)
+  → pasang ke truk → ⚙️ validasi posisi vs axle_positions 🔁 tyre: installed  (movement install)
+        → wks_tyre_installations (removed_at=null)   🔒 partial-unique: 1 ban/slot
+  → inspeksi berkala (tread, pressure) → rekomendasi  📄 tyre_inspections
+        → tread < min_tread_mm → ⚠️ wks_tyre_alerts (tread_low)
+  → lepas (km_remove, removal_reason) → tutup instalasi 🔁 tyre: removed  (movement removal)
+        → total_km_run += (km_remove − km_install)
+        ├─ masih layak → kembali ke stok used         🔁 tyre: in_stock (condition=used)
+        │     → keputusan: pakai lagi / vulkanisir / scrap
+        ├─ kirim vulkanisir → supplier                🔁 tyre: retreading (movement retread_send)
+        │     → terima kembali: cost→book_value, retread_count↑ 🔁 in_stock (retread_return)
+        │           └─ result=failed → 🔁 scrapped → disposal
+        └─ tidak layak → scrap                        🔁 tyre: scrapped (movement scrap)
+                → wks_tyre_disposals (lot jual/buang + proceeds)
+
+Opname ban → scan serial → match/missing/extra/misplaced → adjustment/update lokasi
 ```
-⚙️ Tiap ban unik per `serial_no`; harga/model mengacu `wks_tyre_products`.
-⚙️ Umur/biaya per KM dihitung dari `installations` (km_remove − km_install).
+⚙️ Tiap ban unik per `serial_no`; harga/model mengacu `wks_tyre_products`. **Tanpa WAC** —
+   tiap unit dinilai sendiri: `book_value = acquired_cost + Σ retread_cost`.
+⚙️ **Biaya per KM** = `book_value / total_km_run`. Posisi divalidasi → diagram layout ban.
 
 ---
 
@@ -368,11 +378,15 @@ tidak perlu migrasi besar saat diaktifkan.
 | Entitas | Status (enum) |
 |---|---|
 | Purchase Order | draft → approved → partial → received → closed (· cancelled) |
+| Surat Jalan Masuk (Supplier) | draft → submitted → received (· cancelled) |
 | Serah Terima (GRN) | draft → checking → posted |
-| Surat Jalan (DO) | draft → in_transit → delivered (· cancelled) |
+| Surat Jalan Keluar (DO) | draft → in_transit → delivered (· cancelled) |
 | Tally Sheet | draft → completed |
 | LKM | entered → in_progress → done → exited |
 | Work Order | queued → waiting_part → in_progress → qc → done → delivered |
+| Bon Pengeluaran Sparepart | draft → submitted → approved/rejected → partially_issued → issued (· cancelled) |
+| Core Return | pending → stored → released |
+| Sesi Kerja Gudang | open → closed (· force_closed) |
 | Stock Opname | draft → counting → posted |
 | Ban (Tyre) | in_stock → installed → removed → (retreading →) in_stock / scrapped |
 | Invoice *(future)* | draft → issued → partial → paid |

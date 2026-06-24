@@ -126,16 +126,22 @@ Peran: Gudang, Admin · *(Mekanik: usul pengeluaran · ServiceAdvisor: review)*
 ### B.5 Gudang Ban (Tyre)  (`/app/tyre`)
 Peran: Gudang/GudangBan, Mekanik, Admin
 ```
-/app/tyre/products                 Master model ban (merek+ukuran+pola) — acuan harga
-/app/tyre/tyres                    Daftar unit ban per serial (filter merek/ukuran/status)
-   ├─ /app/tyre/tyres/create       Registrasi unit ban (serial unik, model, DOT)
-   └─ /app/tyre/tyres/{id}         Detail + riwayat instalasi & inspeksi
-/app/tyre/stock                    Stok ban per gudang
+/app/tyre/products                 Master model ban (merek+ukuran+pola+spek) — acuan harga
+/app/tyre/tyres                    Daftar unit ban per serial (filter merek/ukuran/status/kondisi)
+   ├─ /app/tyre/tyres/create       Registrasi unit ban (serial unik, model, DOT, lokasi)
+   └─ /app/tyre/tyres/{id}         Detail + riwayat instalasi/inspeksi/retread + biaya/KM
+/app/tyre/stock                    Stok ban per gudang/lokasi (rak/bin)
 /app/tyre/installations            Instalasi / rotasi (pasang-lepas di posisi unit)
-/app/tyre/inspections              Inspeksi tread depth & tekanan
+   └─ /app/tyre/trucks/{id}/layout Diagram posisi ban pada unit (per axle config)
+/app/tyre/inspections              Inspeksi tread depth & tekanan (+ rekomendasi)
 /app/tyre/retreads                 Vulkanisir (kirim/terima + biaya)
+/app/tyre/opnames                  Opname ban (cek kehadiran per serial)
+/app/tyre/alerts                   Peringatan ban (tread/inspeksi/retread/DOT/stok)
+/app/tyre/disposals                Scrap disposal (lot jual/buang ban afkir)
 /app/tyre/reports                  Biaya per KM · ban perlu ganti/rotasi
 ```
+> Sesi Kerja Gudang **terpadu** dgn sparepart (`/app/inv/shift-sessions`) — gudang `type=both`:
+> satu Buka/Tutup Sesi mencakup mutasi part & ban.
 
 ### B.6 Purchasing  (`/app/po`)
 Peran: Purchasing, Gudang, Admin (approval: Owner/Admin)
@@ -173,6 +179,7 @@ Peran: Admin (sebagian read untuk operasional)
 /app/master/customers              Customer / Armada
 /app/master/trucks                 Unit Truk (+ tipe truk)
    ├─ /app/master/trucks/{id}      Detail: spesifikasi, default driver, GPS
+   └─ /app/master/axle-positions   Skema posisi ban per axle config (4x2/6x4 → slot valid)
    └─ .../documents                STNK/KIR/pajak/asuransi + reminder expiry
 /app/master/drivers                Master Driver / Sopir
    ├─ /app/master/drivers/create   Tambah manual

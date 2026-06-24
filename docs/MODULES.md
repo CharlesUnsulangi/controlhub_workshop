@@ -293,21 +293,49 @@ Setiap ban fisik **unik & wajib punya serial number** (`serial_no`).
 - **Tyre (unit)** (`wks_tyre_tyres`) — *fisik per serial*, menunjuk ke satu product;
   punya siklus hidup, posisi, tread depth sendiri.
 
-**Fitur:** registrasi unit ban (serial unik, DOT, tread depth, kondisi), status
-(*Stok → Terpasang → Dilepas → Vulkanisir → Scrap*), stok & pergerakan,
-**instalasi/rotasi** (ban di posisi truk FL/FR/RL1/…, KM pasang & lepas),
-inspeksi (tread depth & tekanan berkala), vulkanisir (kirim/terima + biaya), laporan biaya per KM.
+**Fitur:**
+- **Master model ban** (`wks_tyre_products`) — brand+size+pattern (acuan harga) + spesifikasi:
+  `axle_application` (steer/drive/trailer/all), tube_type, load_index, ply_rating,
+  **`min_tread_mm`** (ambang ganti), **`retread_max`** (maks vulkanisir).
+- **Registrasi unit** ber-serial unik (DOT, tread, kondisi new/used/retread), status lifecycle
+  (*in_stock → installed → removed → retreading → scrapped*).
+- **Lokasi rak** — ban di gudang menempati **bin** (`wks_mst_locations`, reuse master Inventory);
+  `location_id` pada unit; gudang `type=tyre`/`both`.
+- **Skema posisi per axle config** — `wks_mst_axle_positions` mendefinisikan slot valid per
+  `axle_config` truk (4x2/6x4/…); posisi instalasi **divalidasi** + jadi **diagram layout ban**;
+  ban *steer* di sumbu *drive* → peringatan fitment. (R22 termitigasi.)
+- **Instalasi/rotasi** (`wks_tyre_installations`) — posisi FL/FR/RL1/…, KM pasang & lepas, alasan
+  lepas; **integritas posisi** via partial-unique (1 ban/slot; 1 ban tak terpasang ganda).
+- **Pergerakan** = SATU-SATUNYA cara ubah posisi/status (`wks_tyre_movements`, enum
+  `tyre_movement_type`), via **`TyreService`** dalam transaksi; **wajib Sesi Kerja Gudang** terpadu.
+- **Ban bekas dilepas** — masih layak → masuk **stok `used`** + keputusan (pakai lagi / vulkanisir /
+  scrap); tak layak → scrap.
+- **Inspeksi berkala** (tread & tekanan) → update tread unit + alert bila < `min_tread_mm`.
+- **Vulkanisir** (`wks_tyre_retreads`) — kirim/terima sbg movement; **biaya dikapitalisasi** ke
+  `book_value`; gagal → scrap; blok bila `retread_count ≥ retread_max`.
+- **Opname ban** (`wks_tyre_opnames`) — cek **kehadiran** per serial (match/missing/extra/misplaced).
+- **Alert ban** (`wks_tyre_alerts`) — tread_low, inspection_due, retread_overdue, dot_aged, low_stock.
+- **Scrap disposal** (`wks_tyre_disposals`) — lot jual/buang ban scrap + proceeds.
+- **Biaya per KM** — `book_value / total_km_run` (acquired_cost + Σ retread ÷ KM tempuh).
+- **Sesi Kerja Gudang terpadu** — satu sesi mencakup mutasi part **dan** ban (gudang `both`);
+  movement ban di-tag `shift_session_id` (`wks_inv_shift_sessions`).
 
 **Tabel** (dengan `company_id`)
-- `wks_tyre_products` — brand, size, pattern, type, category_id  *(model — acuan harga)*
-- `wks_tyre_tyres` — **serial_no (unik per company)**, tyre_product_id, dot, tread_depth, condition, status, warehouse_id
-- `wks_tyre_movements` — tyre_id, warehouse_id, type, ref, at
-- `wks_tyre_installations` — tyre_id, truck_id, position, installed_at, km_install, removed_at, km_remove
-- `wks_tyre_inspections` — tyre_id, inspected_at, tread_depth, pressure, note
-- `wks_tyre_retreads` — tyre_id, supplier_id, sent_at, received_at, cost, retread_count
+- `wks_mst_axle_positions` (master) — skema posisi per `axle_config` (slot, sumbu, sisi, role)
+- `wks_tyre_products` — brand, size, pattern, category_id, axle_application, tube_type, load_index, ply_rating, min_tread_mm, retread_max
+- `wks_tyre_tyres` — **serial_no (unik per company)**, tyre_product_id, dot, tread_depth, condition, status, warehouse_id, **location_id**, acquired_cost, retread_cost_total, **book_value**, total_km_run, retread_count
+- `wks_tyre_movements` — tyre_id, type (`tyre_movement_type`), warehouse_id, location_id, **shift_session_id**, unit_cost, ref, moved_at
+- `wks_tyre_installations` — tyre_id, truck_id, position, installed_at/km_install, removed_at/km_remove, removal_reason, work_order_id *(partial-unique posisi)*
+- `wks_tyre_inspections` — tyre_id, inspected_at, tread_depth, pressure, result, recommendation
+- `wks_tyre_retreads` — tyre_id, supplier_id, sent_at, received_at, cost, result, delivery_order_id
+- `wks_tyre_opnames`, `wks_tyre_opname_items` — opname kehadiran per serial
+- `wks_tyre_alerts` — peringatan ban (tread/inspeksi/retread/DOT/stok)
+- `wks_tyre_disposals`, `wks_tyre_disposal_items` — lot scrap + proceeds
+- `wks_tyre_shift_session_tyres` — snapshot kehadiran ban saat buka/tutup sesi
 
-**Desain:** berbagi pola pergerakan dengan `StockService` generik; `TyreService` khusus
-instalasi & lifecycle.
+**Service inti:** `TyreService` — instalasi, lifecycle, retread, opname, valuasi per-unit &
+biaya/KM (semua mutasi dalam `DB::transaction()` + Sesi Kerja Gudang). Berbagi gudang/lokasi &
+sesi dgn Inventory; berbeda dari `StockService` karena **per-unit serial (tanpa WAC)**.
 
 **Peran:** `Gudang`/`GudangBan`, `Mekanik` (pasang/lepas), `Admin`.
 

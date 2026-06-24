@@ -185,7 +185,26 @@ Daftar enum terpusat ada di **§12**.
 | timestamps, deleted_at | | | |
 
 ### wks_mst_truck_types
-| id · company_id (FK) · name `varchar(60)` · axle_config `varchar(20)` · description · timestamps · **unique(company_id, name)** |
+| id · company_id (FK) · name `varchar(60)` · axle_config `varchar(20)` (mis. 4x2, 6x4, 6x2) · axle_count `smallint` null · description · timestamps · **unique(company_id, name)** |
+
+### wks_mst_axle_positions  *(skema posisi ban per axle_config — slot valid + diagram)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| company_id | bigint | no | FK |
+| axle_config | varchar(20) | no | mis. `6x4` — dipadankan ke `truck_types.axle_config` |
+| position_code | varchar(10) | no | FL, FR, RL1, RR1, RL2, RR2, … |
+| axle_no | smallint | no | nomor sumbu (1=depan) |
+| side | varchar(5) | no | enum axle_side (left/right) |
+| ordinal | smallint | no | urut tampil pada diagram |
+| axle_role | varchar(10) | no | enum axle_application (steer/drive/trailer) — utk validasi fitment |
+| is_dual | bool | no | default false — posisi roda ganda (dalam/luar) |
+| timestamps | | | **unique(company_id, axle_config, position_code)** · index(company_id, axle_config) |
+
+> **Validasi instalasi:** `wks_tyre_installations.position` harus salah satu `position_code`
+> untuk `axle_config` dari `truck.truck_type`. Mencegah salah-ketik posisi & jadi sumber
+> **diagram layout ban** (R22). `axle_role` vs `tyre_products.axle_application` → peringatan
+> bila ban *steer* dipasang di sumbu *drive* (warning, bukan blok).
 
 ### wks_mst_trucks
 | Kolom | Tipe | Null | Keterangan |
@@ -587,7 +606,15 @@ Daftar enum terpusat ada di **§12**.
 > `core_returns.disposition=scrapped/disposed` + `scrap_disposal_id` diisi. Pencatatan
 > pendapatan scrap penuh = **future** (selaras mode INTERNAL; lihat §0 MODULES).
 
-### wks_inv_shift_sessions  *(Sesi Kerja Gudang — Opening/Closing per operator)*
+### wks_inv_shift_sessions  *(Sesi Kerja Gudang — Opening/Closing per operator; **terpadu part + ban**)*
+
+> **Lingkup terpadu:** sesi ini gudang-scoped, **bukan** modul-scoped. Di gudang `type=both`,
+> SATU sesi mencakup mutasi **sparepart** (`wks_inv_stock_movements`) **dan ban**
+> (`wks_tyre_movements`) — keduanya di-tag `shift_session_id` ke baris ini. (Nama tabel tetap
+> ber-prefix `wks_inv_` secara historis; perannya = **sesi gudang generik**.) Closing
+> men-snapshot saldo part (`wks_inv_shift_session_balances`) **dan** kehadiran ban
+> (`wks_tyre_shift_session_tyres`).
+
 | Kolom | Tipe | Null | Keterangan |
 |---|---|---|---|
 | id | bigint | no | PK |
@@ -643,6 +670,12 @@ Daftar enum terpusat ada di **§12**.
 > buka (opening_qty) & tutup (closing_qty). `in/out` = movement **ter-tag sesi** (akuntabilitas
 > operator). `diff_qty≠0` menandai gudang berubah di luar yang dicatat operator ini (mis.
 > operator lain di gudang sama, atau mutasi tak ter-tag) → naikkan `anomaly_count` & review.
+
+### wks_tyre_shift_session_tyres  *(snapshot kehadiran BAN per serial saat buka & tutup)*
+| id · session_id (FK shift_sessions) · tyre_id (FK tyres) · location_id (FK null) · present_open `bool` (di gudang saat buka) · present_close `bool` null (saat tutup) · moved_in `bool` default false (masuk ter-tag sesi) · moved_out `bool` default false (keluar ter-tag sesi) · anomaly `bool` default false (`present_close` beda dari `present_open ± moved`) · **unique(session_id, tyre_id)** |
+
+> Untuk ban (serial), "saldo" = **kehadiran** (ada/tidak), bukan qty. `anomaly=true` bila ban
+> hilang/muncul tanpa movement ter-tag → naikkan `shift_sessions.anomaly_count`.
 
 ---
 
@@ -939,48 +972,149 @@ snapshot harian dibuat job tengah malam, dipangkas berkala, **baris akhir-bulan
 
 ## 9. GUDANG BAN / TYRE (`wks_tyre_`)
 
-### wks_tyre_products  *(model ban — acuan harga)*
-| id · company_id (FK) · code `varchar(40)` · brand `varchar(60)` · size `varchar(30)` (mis. 1000R20) · pattern `varchar(40)` · category_id (FK null) · description · timestamps · deleted_at · **unique(company_id, code)** |
+> Ban = **aset ber-serial** dgn siklus hidup & posisi pada unit (bukan stok bulk). Tiap unit
+> **dinilai sendiri** (TANPA WAC). Berbagi **gudang & lokasi rak** (`wks_mst_warehouses`/
+> `wks_mst_locations`) dan **Sesi Kerja Gudang terpadu** (`wks_inv_shift_sessions` — satu sesi
+> mencakup mutasi part **dan** ban di gudang `type=both`) dgn modul Inventory (§5).
 
-### wks_tyre_tyres  *(unit fisik per serial)*
+### wks_tyre_products  *(model ban — acuan harga & spesifikasi)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id · company_id (FK) | | | |
+| code | varchar(40) | no | **unique(company_id, code)** |
+| brand | varchar(60) | no | |
+| size | varchar(30) | no | mis. 1000R20 |
+| pattern | varchar(40) | yes | pola tapak |
+| category_id | bigint | yes | FK categories (type=tyre) |
+| axle_application | varchar(10) | yes | enum axle_application (steer/drive/trailer/all) — posisi disarankan |
+| tube_type | varchar(10) | yes | enum tube_type (tubeless/tubetype) |
+| load_index | varchar(10) | yes | mis. 146/143 |
+| ply_rating | varchar(10) | yes | mis. 16PR |
+| min_tread_mm | decimal(5,2) | yes | ambang **ganti** (mis. 3.00) → alert/scrap |
+| retread_max | smallint | no | default 0 — maks vulkanisir (0 = tak boleh retread) |
+| is_active | bool | no | default true |
+| timestamps, deleted_at | | | |
+
+### wks_tyre_tyres  *(unit fisik per serial — aset)*
 | Kolom | Tipe | Null | Keterangan |
 |---|---|---|---|
 | id | bigint | no | PK |
 | company_id | bigint | no | FK |
 | tyre_product_id | bigint | no | FK tyre_products |
-| serial_no | varchar(50) | no | **unique(company_id, serial_no)** |
-| warehouse_id | bigint | yes | FK (null bila terpasang) |
-| dot_code | varchar(20) | yes | |
+| serial_no | varchar(50) | no | **identitas unik** — partial unique `(company_id, serial_no) WHERE deleted_at IS NULL` |
+| warehouse_id | bigint | yes | FK — null bila `installed`/`retreading` |
+| location_id | bigint | yes | FK `wks_mst_locations` (rak/bin saat di gudang; bin storable) |
+| dot_code | varchar(20) | yes | usia ban (minggu/tahun) → alert umur |
 | condition | varchar(10) | no | enum tyre_condition (new/used/retread) |
-| tread_depth_mm | decimal(5,2) | yes | |
+| tread_depth_mm | decimal(5,2) | yes | tapak terkini (diisi dari inspeksi) |
 | status | varchar(15) | no | enum tyre_status |
-| purchase_cost | decimal(15,2) | yes | |
+| acquired_cost | decimal(15,2) | yes | HPP perolehan (dari GRN / beli used) |
+| retread_cost_total | decimal(15,2) | no | default 0 — Σ biaya vulkanisir |
+| book_value | decimal(15,2) | no | default 0 — `acquired_cost + retread_cost_total` (basis biaya) |
+| total_km_run | bigint | no | default 0 — cache Σ (km_remove − km_install) instalasi tertutup |
 | retread_count | smallint | no | default 0 |
-| timestamps, deleted_at | | | |
+| timestamps, deleted_at | | | index(company_id, status) · index(company_id, warehouse_id, condition) |
 
-### wks_tyre_movements
-| id · company_id (FK) · tyre_id (FK) · warehouse_id (FK null) · type `varchar(20)` (enum movement_type) · ref_type · ref_id · note · moved_at `timestamptz` · created_by (FK users) |
+> **Biaya per KM** = `book_value / total_km_run` (∞ bila belum jalan). `total_km_run` &
+> `book_value` di-update via `TyreService` saat instalasi ditutup / retread diterima.
+> Ban *removed* yang **masih layak** → `status=in_stock` + `condition=used` (keputusan
+> dispose menyusul). `warehouse_id`/`location_id` diisi kembali saat masuk stok.
 
-### wks_tyre_installations
+### wks_tyre_movements  *(SATU-SATUNYA sumber perubahan posisi/status — append-only)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| company_id | bigint | no | FK |
+| tyre_id | bigint | no | FK tyres |
+| type | varchar(20) | no | enum **tyre_movement_type** (receipt/install/removal/transfer/retread_send/retread_return/scrap/adjustment) |
+| warehouse_id | bigint | yes | FK — gudang konteks (tujuan utk in, asal utk out) |
+| location_id | bigint | yes | FK locations — bin tujuan (in) |
+| from_warehouse_id | bigint | yes | FK — utk `transfer` (asal) |
+| shift_session_id | bigint | yes | FK `wks_inv_shift_sessions` (sesi gudang terpadu yg men-tag) |
+| unit_cost | decimal(15,2) | yes | biaya terkait (receipt=HPP, retread_return=biaya vulkanisir) → kapitalisasi `book_value` |
+| ref_type | varchar(30) | yes | goods_receipt / installation / retread / opname / disposal / delivery_order |
+| ref_id | bigint | yes | |
+| note | varchar(255) | yes | |
+| moved_at | timestamptz | no | |
+| created_by | bigint | yes | FK users |
+| | | | index(company_id, tyre_id, moved_at) · index(company_id, type, moved_at) |
+
+> Mutasi dilakukan via **`TyreService`** dalam `DB::transaction()`: ubah `tyres.status`/
+> `warehouse_id`/`location_id` + tulis movement (1 baris/peristiwa, qty implisit 1).
+> Wajib **Sesi Kerja Gudang `open`** (sama spt Inventory) — di-tag `shift_session_id`.
+
+### wks_tyre_installations  *(pemasangan/rotasi di posisi unit)*
 | Kolom | Tipe | Null | Keterangan |
 |---|---|---|---|
 | id | bigint | no | PK |
 | company_id | bigint | no | FK |
 | tyre_id | bigint | no | FK tyres |
 | truck_id | bigint | no | FK trucks |
-| position | varchar(10) | no | FL,FR,RL1,RR1,… |
+| position | varchar(10) | no | FL,FR,RL1,RR1,… (divalidasi vs `wks_mst_axle_positions`) |
 | installed_at | timestamptz | no | |
-| km_install | bigint | yes | |
+| km_install | bigint | yes | KM unit saat pasang |
 | removed_at | timestamptz | yes | null = masih terpasang |
-| km_remove | bigint | yes | |
+| km_remove | bigint | yes | KM unit saat lepas |
+| tread_install_mm | decimal(5,2) | yes | tapak saat pasang |
+| tread_remove_mm | decimal(5,2) | yes | tapak saat lepas |
 | work_order_id | bigint | yes | FK work_orders |
+| removal_reason | varchar(20) | yes | enum removal_reason (rotation/worn/damage/retread/swap) |
+| note | varchar(255) | yes | |
+| | | | **partial unique:** `(truck_id, position) WHERE removed_at IS NULL` (1 ban/slot) · `(tyre_id) WHERE removed_at IS NULL` (ban di 1 tempat) · index(company_id, truck_id) |
+
+> Dua partial-unique = **integritas posisi**: tak ada dua ban di slot sama, satu ban tak
+> bisa terpasang ganda. Tutup instalasi (`removed_at`) → tambah `km_remove−km_install` ke
+> `tyres.total_km_run`. `km_remove ≥ km_install` (CHECK).
+
+### wks_tyre_inspections  *(inspeksi berkala — tapak & tekanan)*
+| id · company_id (FK) · tyre_id (FK) · truck_id (FK null, bila terpasang) · position `varchar(10)` null · inspected_at `timestamptz` · tread_depth_mm `decimal(5,2)` · pressure_psi `decimal(6,2)` · result `varchar(10)` (enum inspect_condition: good/warning/bad) · recommendation `varchar(20)` null (keep/rotate/retread/scrap) · inspected_by (FK users) · note |
+
+> Inspeksi meng-update `tyres.tread_depth_mm`. `tread < product.min_tread_mm` → buat
+> `wks_tyre_alerts` (tread_low). Inspeksi terjadwal (overdue) juga memicu alert.
+
+### wks_tyre_retreads  *(vulkanisir — kirim & terima)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id · company_id (FK) · tyre_id (FK) | | | |
+| supplier_id | bigint | no | FK suppliers (tukang vulkanisir) |
+| retread_no | varchar(30) | yes | **unique(company_id, retread_no)** |
+| sent_at | timestamptz | no | → movement `retread_send`, tyre `retreading` |
+| received_at | timestamptz | yes | → movement `retread_return`, tyre `in_stock` (condition=retread) |
+| cost | decimal(15,2) | yes | biaya → kapitalisasi `book_value` + `retread_cost_total`, `retread_count++` |
+| new_tread_mm | decimal(5,2) | yes | tapak hasil |
+| result | varchar(10) | yes | enum retread_result (ok/failed) |
+| delivery_order_id | bigint | yes | FK `wks_inv_delivery_orders` (surat jalan kirim, opsional) |
 | note | varchar(255) | yes | |
 
-### wks_tyre_inspections
-| id · company_id (FK) · tyre_id (FK) · inspected_at `timestamptz` · tread_depth_mm `decimal(5,2)` · pressure_psi `decimal(6,2)` · position `varchar(10)` null · note |
+> `result=failed` → tyre langsung `scrapped` (tak masuk stok) + masuk `wks_tyre_disposals`.
+> Saat `retreading`, ban **WIP di supplier** (off-site) — tak terhitung stok gudang.
+> Blok bila `retread_count ≥ product.retread_max`.
 
-### wks_tyre_retreads
-| id · company_id (FK) · tyre_id (FK) · supplier_id (FK) · sent_at `timestamptz` · received_at `timestamptz` null · cost `decimal(15,2)` · result `varchar(10)` (enum retread_result: ok/failed) · note |
+### wks_tyre_opnames  *(stok opname ban — cek kehadiran fisik per serial)*
+| id · company_id (FK) · branch_id (FK) · warehouse_id (FK) · opname_no `varchar(30)` **unique(company_id, opname_no)** · status `varchar(12)` (enum opname_status: draft/counting/posted) · counted_at `timestamptz` null · counted_by (FK users) · note · timestamps |
+
+### wks_tyre_opname_items
+| id · opname_id (FK) · tyre_id (FK null — null bila serial **asing** ter-scan) · scanned_serial `varchar(50)` · expected `bool` (sistem catat di gudang ini) · present `bool` (fisik ada) · location_id (FK null, lokasi temuan) · result `varchar(10)` (enum opname_result: match/missing/extra/misplaced) · note · **unique(opname_id, tyre_id)** |
+
+> Posting opname → ban `missing` (hilang) di-`scrapped`/`adjustment` (movement `adjustment`);
+> `misplaced` → update `location_id`; `extra`/asing → registrasi/alert. Serialized = cek
+> **kehadiran**, bukan hitung qty.
+
+### wks_tyre_alerts  *(peringatan ban)*
+| id · company_id (FK) · tyre_id (FK null) · warehouse_id (FK null) · type `varchar(20)` (enum tyre_alert_type: tread_low/inspection_due/retread_overdue/dot_aged/low_stock) · severity `varchar(10)` (warning/critical) · status `varchar(12)` (enum alert_status: open/acknowledged/resolved) · detail `jsonb` null · created_at · resolved_at null · resolved_by null |
+
+> `tread_low` (tapak < min), `inspection_due` (inspeksi telat), `retread_overdue` (terlalu lama
+> di supplier), `dot_aged` (umur DOT > ambang), `low_stock` (stok ban per ukuran < min). Notif
+> via `wks_adm_notification_rules` (lihat §3 Admin).
+
+### wks_tyre_disposals  *(lot pembuangan/penjualan ban scrap)*
+| id · company_id (FK) · branch_id (FK) · disposal_no `varchar(30)` **unique(company_id, disposal_no)** · type `varchar(10)` (enum scrap_disposal_type: sold/discarded) · disposed_at `timestamptz` · buyer `varchar(120)` null · total_proceeds `decimal(15,2)` default 0 · note · created_by · timestamps |
+
+### wks_tyre_disposal_items
+| id · disposal_id (FK) · tyre_id (FK) · book_value `decimal(15,2)` (nilai saat dibuang) · proceeds `decimal(15,2)` default 0 · **unique(disposal_id, tyre_id)** |
+
+> Ban `scrapped` (dari inspeksi bad, retread gagal, opname missing) dikumpulkan → dijual/buang
+> per lot. Posting → movement `scrap` (bila belum) + tyre final.
 
 ---
 
@@ -1073,7 +1207,11 @@ lkm_entries 1─* lkm_inspections ; lkm_entries 1─1 lkm_gateouts
 lkm_entries 1─* svc_work_orders 1─* svc_work_order_items
 svc_work_orders *─1 mst_trucks ; *─1 mst_mechanics
 tyre_products 1─* tyre_tyres 1─* tyre_installations *─1 mst_trucks
-tyre_tyres 1─* tyre_inspections ; tyre_tyres 1─* tyre_retreads
+tyre_tyres 1─* tyre_inspections ; tyre_tyres 1─* tyre_retreads ; tyre_tyres 1─* tyre_movements
+tyre_tyres *─1 mst_locations (rak/bin saat in_stock) ; tyre_movements *─1 inv_shift_sessions (sesi terpadu)
+mst_truck_types.axle_config ─* mst_axle_positions ◀ validasi tyre_installations.position
+tyre_opnames 1─* tyre_opname_items *─1 tyre_tyres ; tyre_disposals 1─* tyre_disposal_items *─1 tyre_tyres
+tyre_tyres 1─* tyre_alerts ; tyre_retreads ─▶ tyre_movements (send/return) + book_value
 svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 ```
 
@@ -1128,6 +1266,13 @@ svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 | inspect_condition | good, warning, bad |
 | tyre_condition | new, used, retread |
 | tyre_status | in_stock, installed, removed, retreading, scrapped |
+| tyre_movement_type | receipt, install, removal, transfer, retread_send, retread_return, scrap, adjustment |
+| axle_application | steer, drive, trailer, all |
+| axle_side | left, right |
+| tube_type | tubeless, tubetype |
+| removal_reason | rotation, worn, damage, retread, swap |
+| opname_result | match, missing, extra, misplaced |
+| tyre_alert_type | tread_low, inspection_due, retread_overdue, dot_aged, low_stock |
 | retread_result | ok, failed |
 | wo_status | queued, waiting_part, in_progress, qc, done, delivered |
 | wo_item_type | service, spare_part, tyre |
