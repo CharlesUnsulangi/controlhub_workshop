@@ -87,7 +87,7 @@ Peran: ServiceAdvisor, KepalaMekanik, Mekanik, Kasir, Admin
 ```
 
 ### B.4 Gudang Sparepart  (`/app/inv`)
-Peran: Gudang, Admin
+Peran: Gudang, Admin · *(Mekanik: usul pengeluaran · ServiceAdvisor: review)*
 ```
 /app/inv/parts                     Master Sparepart (SKU internal kanonik)
    ├─ /app/inv/parts/create        + cross-ref nomor pabrikan (Hino/Isuzu) & brand
@@ -96,6 +96,10 @@ Peran: Gudang, Admin
 /app/inv/stock                     Stok per gudang/lokasi rak & kondisi (baru/bekas)
    └─ filter: warehouse · rak · condition (new/used/rebuilt)
 /app/inv/locations                 Lokasi rak (zona/rak/bay/level/bin + barcode)
+/app/inv/part-issues               Bon Pengeluaran Sparepart (ref WO→LKM→truck)
+   ├─ /app/inv/part-issues/create  Usul oleh Mekanik (qty diminta per part)
+   ├─ /app/inv/part-issues/{id}/review   Review Service Officer (approve/reject, potong qty)
+   └─ /app/inv/part-issues/{id}/issue    Keluarkan oleh Gudang (movement out, HPP→WO)
 /app/inv/movements                 Pergerakan stok (in/out/transfer/adjustment)
 /app/inv/transfers                 Transfer antar gudang
 /app/inv/teardown                  Penerimaan part bekas (copotan/teardown → stok used)

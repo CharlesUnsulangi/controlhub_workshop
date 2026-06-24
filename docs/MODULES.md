@@ -197,6 +197,9 @@ pergerakan, valuasi, opname, serta dokumen serah terima & surat jalan.
   part bekas RUSAK sebagai **bukti** (`wks_inv_core_returns`), ditahan lalu **dijual scrap**.
   Beda dari teardown: core rusak **tidak** masuk stok layak-pakai. Telusur asal truck→LKM→WO.
 - **Pergerakan stok** = SATU-SATUNYA cara stok berubah (in/out/transfer/adjustment), reservasi WO.
+- **Pengeluaran Sparepart (Bon/Part Issue)** — alur ber-approval tersambung WO→LKM→truck:
+  **diusulkan Mekanik** → **di-review Service Officer (ServiceAdvisor)** (approve/reject, bisa
+  potong qty) → **dikeluarkan Gudang** (movement out, HPP ke `wo_item`). SoD: pengusul ≠ reviewer.
 - **Konversi UOM** — beli per *box*, simpan per *pcs*; satuan alternatif + factor per SKU
   (`wks_inv_part_uoms`); stok & WAC selalu di **UOM dasar**, dokumen snapshot `uom_factor`.
 - **Stok negatif: diizinkan + alert** — `out` melebihi saldo tetap diproses, lalu buat
@@ -216,6 +219,7 @@ pergerakan, valuasi, opname, serta dokumen serah terima & surat jalan.
 - `wks_inv_stock_items` — saldo **fisik** per rak: spare_part_id, warehouse_id, location_id, **condition**, qty_on_hand, qty_reserved
 - `wks_inv_stock_values` — saldo **valuasi/WAC** per gudang: spare_part_id, warehouse_id, condition, qty_on_hand, **avg_cost**, total_value, reorder override
 - `wks_inv_stock_movements` — ledger append-only: **condition**, type, **qty_in/qty_out** (net_qty generated), ref_type/ref_id, unit_cost
+- `wks_inv_part_issues`, `wks_inv_part_issue_items` — Bon Pengeluaran Sparepart (usul mekanik→review SO→keluar gudang); ref WO/LKM/truck; qty_requested/approved/issued
 - `wks_inv_stock_loc_snapshots`, `wks_inv_stock_val_snapshots` — snapshot saldo harian (anchor bulanan, dipangkas) untuk stok historis & kartu stok
 - `wks_inv_stock_opnames`, `wks_inv_stock_opname_items` (per **condition**)
 

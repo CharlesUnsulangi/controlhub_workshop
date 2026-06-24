@@ -9,6 +9,8 @@
 > R33–R44, G13–G15. Keputusan: **konversi UOM didukung** (R37/G13), **stok negatif
 > diizinkan + alert** (R38/R41/G14), **core return wajib** untuk part non-consumable
 > (bukti rusak → scrap; R42–R44, tabel `wks_inv_core_returns`/`scrap_disposals`).
+> **Pengeluaran sparepart** ber-approval (usul Mekanik → review ServiceAdvisor → keluar
+> Gudang; `wks_inv_part_issues`, SoD; R45) tersambung WO→LKM→truck.
 
 ## Cara Baca
 
@@ -45,7 +47,7 @@
 | R41 | **WAC rusak saat saldo ≤ 0** — pembagian qty ≤ 0 (akibat stok negatif diizinkan) | M | Sedang | 🟠 | **Bekukan `avg_cost`** (nilai terakhir) selama qty ≤ 0; hitung ulang saat qty positif; `out` saat negatif pakai WAC beku | Termitigasi |
 | R39 | **Double-allocation Surat Jalan** — stok tak di-reserve antara DO draft→delivered | M | Sedang | 🟠 | Reserve `qty_reserved` saat DO dibuat; lepas saat posting/cancel (sejajar reservasi WO) | Terbuka |
 | R40 | **Snapshot historis hilang** — pruning harian menghapus anchor → query stok tanggal lama harus scan jauh | L | Sedang | 🟡 | `is_anchor` (akhir bulan) permanen, hanya snapshot harian non-anchor dipangkas | Termitigasi |
-| R8 | Reservasi part menggantung saat WO batal (`qty_reserved` tak dilepas) | M | Sedang | 🟠 | Lifecycle reservasi eksplisit; job pembersih; event saat WO cancel | Terbuka |
+| R8 | Reservasi part menggantung saat WO/bon batal (`qty_reserved` tak dilepas) | M | Sedang | 🟠 | Lifecycle reservasi eksplisit; lepas saat `part_issue` rejected/cancelled & WO cancel; job pembersih | Terbuka |
 | R9 | Snapshot harga gagal → biaya berubah retroaktif | L | Tinggi | 🟠 | Copy `unit_cost`/`unit_price` ke item saat create (sudah dirancang) | Termitigasi |
 | R10 | Valuasi **part bekas** subyektif (unit_cost taksiran) | M | Sedang | 🟠 | Kebijakan penilaian; approval; kategori cost used terpisah | Terbuka |
 | R11 | WAC vs FIFO belum final → koreksi mahal bila berubah setelah live | M | Sedang | 🟠 | Putuskan sekarang (default WAC, MODULES §14) | Terbuka |
@@ -58,6 +60,7 @@
 | R13 | Token integrasi HRD tersimpan plaintext | M | Tinggi | 🔴 | Enkripsi (Laravel encrypted cast); `.env`; rotasi token | Terbuka |
 | R14 | Audit log tak mencakup aksi sensitif (adjustment stok, ubah harga, impersonate) | M | Sedang | 🟠 | Audit wajib pada aksi kritis; `wks_core_audit_logs` + `wks_price_histories` | Termitigasi |
 | R15 | Upload foto (LKM) tak tervalidasi (tipe/ukuran/malware) | M | Sedang | 🟠 | Validasi mime/size; storage privat; nama acak | Terbuka |
+| R45 | **Pengeluaran sparepart tanpa review** — mekanik keluarkan part tanpa persetujuan / setujui sendiri | M | Tinggi | 🟠 | Bon `wks_inv_part_issues` ber-status; **SoD `requested_by ≠ reviewed_by`**; hanya `approved` bisa di-issue; policy per peran (Mekanik usul, ServiceAdvisor review, Gudang issue) | Termitigasi |
 
 ### D. Integrasi ControlHub HRD
 

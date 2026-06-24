@@ -158,12 +158,15 @@ Truk tiba → buat LKM (/app/lkm/create)        🔁 LKM: entered
 ```
 LKM → Work Order                               🔁 WO: queued
   → estimasi/rencana: tambah item (jasa/part/ban) ke wks_svc_work_order_items
-  → request part ke gudang
-        ├─ stok cukup → ⚙️ StockService reserve (qty_reserved↑)  🔁 WO: in_progress
-        └─ stok kurang → buat PR/PO (#4)                          🔁 WO: waiting_part
+  → BON PENGELUARAN SPAREPART (📄 wks_inv_part_issues, ref wo_id → lkm_id, truck_id)
+        👤 Mekanik USUL (qty_requested)              🔁 issue: draft→submitted
+        👤 Service Officer REVIEW (approve qty_approved / reject)  🔁 issue: approved/rejected
+            └─ approved → ⚙️ StockService reserve (qty_reserved↑)  🔁 WO: in_progress
+            └─ stok kurang → buat PR/PO (#4)                       🔁 WO: waiting_part
   → mekanik kerjakan; catat jam kerja
-  → PEMAKAIAN part → ⚙️ StockService:
-        stock_movement (type=out, unit_cost=avg_cost) → qty_on_hand↓, reserved↓
+  → PENGELUARAN/PEMAKAIAN part → 👤 Gudang issue → ⚙️ StockService:
+        stock_movement (type=out, ref=part_issue, unit_cost=avg_cost) → qty_on_hand↓, reserved↓
+        🔁 issue: issued/partially_issued
         → bila qty_on_hand < 0 → tidak diblokir; buat stock_alert (negative_stock) + notifikasi
         → wo_item.unit_cost diisi dari avg_cost (HPP; beku bila saldo ≤ 0)
   → CORE RETURN (part baru non-consumable) → 📄 wks_inv_core_returns (1:1 wo_item)

@@ -370,7 +370,7 @@ Daftar enum terpusat ada di **§12**.
 | qty_out | decimal(15,3) | no | default 0 — qty keluar |
 | net_qty | decimal(15,3) | — | **GENERATED ALWAYS AS (qty_in - qty_out) STORED** |
 | unit_cost | decimal(15,2) | no | biaya per unit saat mutasi |
-| ref_type | varchar(50) | yes | sumber (GRN, DO, WO, opname, teardown) — polimorfik |
+| ref_type | varchar(50) | yes | sumber (GRN, DO, part_issue, opname, teardown) — polimorfik |
 | ref_id | bigint | yes | |
 | note | varchar(255) | yes | |
 | moved_at | timestamptz | no | |
@@ -384,6 +384,56 @@ Daftar enum terpusat ada di **§12**.
 > backdate/insert paralel) → dihitung saat query via window function dalam satu periode,
 > berpangkal pada snapshot harian (lihat §7c).
 > Part **bekas masuk** lewat `type=in`, `ref_type=teardown`/`wo_return` (bukan GRN/PO).
+
+### wks_inv_part_issues  *(Bon Pengeluaran Sparepart — usul mekanik → review SO → keluar gudang)*
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| company_id | bigint | no | FK |
+| branch_id | bigint | no | FK |
+| issue_no | varchar(30) | no | **unique(company_id, issue_no)** |
+| wo_id | bigint | no | FK work_orders — kontainer (bawa LKM & truck) |
+| lkm_id | bigint | yes | FK lkm_entries — **telusur** (denormalized dari WO) |
+| truck_id | bigint | yes | FK trucks — **telusur** (denormalized dari WO) |
+| warehouse_id | bigint | no | FK — gudang sumber |
+| status | varchar(15) | no | enum part_issue_status; default `draft` |
+| requested_by | bigint | no | FK users — **mekanik pengusul** |
+| requested_at | timestamptz | no | |
+| reviewed_by | bigint | yes | FK users — **service officer (ServiceAdvisor) reviewer** |
+| reviewed_at | timestamptz | yes | |
+| review_note | varchar(255) | yes | alasan approve/reject |
+| issued_by | bigint | yes | FK users — petugas Gudang yang mengeluarkan |
+| issued_at | timestamptz | yes | |
+| note | varchar(255) | yes | |
+| timestamps | | | index(company_id, wo_id) · index(company_id, status) |
+
+> **Alur:** mekanik buat (`draft`) → `submitted` → Service Officer **review**:
+> `approved` (isi `qty_approved`, reserve stok) / `rejected` (+`review_note`) → Gudang keluarkan:
+> `issued`/`partially_issued` (movement out, ref=`part_issue`). **SoD:** `requested_by ≠ reviewed_by`
+> (mekanik tak bisa setujui sendiri). Telusur **truck & LKM** otomatis dari `wo_id` (disalin ke
+> `lkm_id`/`truck_id` saat dibuat). Beda dari **Surat Jalan** (`delivery_orders`): part issue =
+> pengeluaran **internal ke WO** (konsumsi), bukan barang keluar fisik ke luar gudang.
+
+### wks_inv_part_issue_items
+| Kolom | Tipe | Null | Keterangan |
+|---|---|---|---|
+| id | bigint | no | PK |
+| issue_id | bigint | no | FK |
+| spare_part_id | bigint | no | FK (SKU) |
+| wo_item_id | bigint | yes | FK work_order_items — baris rencana WO terkait |
+| condition | varchar(10) | no | part_condition; default `new` |
+| uom_id | bigint | yes | FK uoms (null = UOM dasar) |
+| uom_factor | decimal(15,6) | no | default 1 — snapshot konversi |
+| qty_requested | decimal(15,3) | no | **diusulkan mekanik** |
+| qty_approved | decimal(15,3) | no | default 0 — **disetujui Service Officer** (≤ requested) |
+| qty_issued | decimal(15,3) | no | default 0 — **nyata dikeluarkan Gudang** |
+| location_id | bigint | yes | FK locations — rak asal |
+| unit_cost | decimal(15,2) | yes | HPP ter-snapshot saat issue (dari `avg_cost`) → isi `wo_item.unit_cost` |
+| note | varchar(255) | yes | |
+
+> `qty_approved` boleh < `qty_requested` (SO memangkas). Saat approve → `StockService` reserve
+> (`qty_reserved += qty_approved`). Saat issue → movement `out` (qty_issued, UOM dasar via factor),
+> `qty_reserved` & `qty_on_hand` turun; stok negatif diizinkan + alert (lihat `stock_alerts`).
 
 ### wks_inv_stock_opnames
 | id · company_id (FK) · warehouse_id (FK) · opname_no · status `varchar(15)` (enum opname_status: draft/counting/posted) · opname_date `date` · note · created_by · posted_at `timestamptz` null · timestamps · **unique(company_id, opname_no)** |
@@ -894,6 +944,7 @@ svc_work_orders 1─* svc_invoices 1─* svc_payments   (future)
 | core_disposition | held, scrapped, disposed |
 | core_return_status | pending, stored, released |
 | scrap_disposal_type | sold, discarded |
+| part_issue_status | draft, submitted, approved, rejected, partially_issued, issued, cancelled |
 | tax_type | exclusive, inclusive, non_pkp |
 | price_item_type | spare_part, tyre_product |
 | price_source | manual, bulk, import |
