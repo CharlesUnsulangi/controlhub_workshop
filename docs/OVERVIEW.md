@@ -193,18 +193,24 @@ WorkOrder (N) ──> (1) Mechanic (assignee)
 WorkOrder (1) ──  (1) Invoice ──< (N) Payment
 
 -- Gudang & Pembelian --
-SparePart (1) ──< (N) StockItem  >── (1) Warehouse   (stok per gudang + lokasi rak)
-SparePart (1) ──< (N) StockMovement (masuk/keluar/transfer/adjustment)
+Warehouse (1) ──< (N) Location (hierarki rak/bin: area/zona/rak/shelf→bin)
+SparePart (1) ──< (N) StockItem  >── (1) Location   (saldo FISIK per bin)
+SparePart (1) ──< (N) StockValue >── (1) Warehouse  (valuasi/WAC per gudang+kondisi)
+SparePart (1) ──< (N) StockMovement (qty_in/qty_out; ter-tag ShiftSession)
+WorkOrder (1) ──< (N) PartIssue → StockMovement (out)   ; WO ──< CoreReturn (bekas rusak)
+ShiftSession (operator: open→close, snapshot + anomali)
 Supplier  (1) ──< (N) PurchaseOrder ──< (N) POItem
-PurchaseOrder (1) ──< (N) GoodsReceipt (GRN) → StockMovement
+PurchaseOrder (1) ──< (N) SupplierDelivery (SJ masuk) ──< (N) GoodsReceipt (GRN) → StockMovement
 
-User ──> Role (RBAC)
+User ──> Role (RBAC) ; User ─(supplier_id)→ Supplier (portal /vendor)
+NotificationRule → Notification (WA/email/in-app)
 ```
 
 Entitas inti: `Customer`, `Truck`, `PMSchedule`, `WorkOrder`, `WorkOrderItem`,
-`Service`, `SparePart`, `Warehouse`, `StockItem`, `StockMovement`, `Supplier`,
-`PurchaseOrder`, `POItem`, `GoodsReceipt`, `Invoice`, `Payment`, `Mechanic`,
-`User`, `Role`.
+`Service`, `SparePart`, `Warehouse`, `Location`, `StockItem`, `StockValue`,
+`StockMovement`, `PartIssue`, `CoreReturn`, `ShiftSession`, `Supplier`,
+`PurchaseOrder`, `POItem`, `SupplierDelivery`, `GoodsReceipt`, `NotificationRule`,
+`Invoice`, `Payment`, `Mechanic`, `User`, `Role`.
 
 ---
 
