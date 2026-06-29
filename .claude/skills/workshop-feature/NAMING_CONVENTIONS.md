@@ -16,17 +16,18 @@ satu database dipakai bersama aplikasi lain, dan konsisten antar developer.
 |---|---|---|
 | `wks_core_` | Core / system admin (TANPA `company_id`) | `wks_core_companies`, `wks_core_audit_logs` |
 | `wks_adm_` | Admin: user/akses/setting | `wks_adm_roles`, `wks_adm_document_sequences` |
-| `wks_mst_` | Master data referensi | `wks_mst_customers`, `wks_mst_trucks`, `wks_mst_warehouses` |
-| `wks_lkm_` | Laporan Kendaraan Masuk | `wks_lkm_entries`, `wks_lkm_inspections` |
+| `wks_ms_` | Master data referensi | `wks_ms_customers`, `wks_ms_trucks`, `wks_ms_warehouses` |
+| `wks_lkm_` | Laporan Kendaraan Masuk | `wks_lkm_pmb`, `wks_lkm_entries`, `wks_lkm_inspections` |
 | `wks_po_` | Purchasing Order | `wks_po_orders`, `wks_po_goods_receipts` |
 | `wks_inv_` | Gudang Sparepart (Inventory) | `wks_inv_spare_parts`, `wks_inv_stock_movements` |
 | `wks_tyre_` | Gudang Ban | `wks_tyre_tyres`, `wks_tyre_installations` |
 | `wks_svc_` | Servis / Work Order | `wks_svc_work_orders`, `wks_svc_invoices` |
 | `wks_price_` | Price List Supplier (harga beli part & ban) | `wks_price_lists`, `wks_price_list_items`, `wks_price_histories` |
+| `wks_ap_` | Hutang Supplier / Accounts Payable (Kontrabon + Kasir) | `wks_ap_kontrabons`, `wks_ap_kontrabon_invoices`, `wks_ap_bank_accounts`, `wks_ap_payment_requests`, `wks_ap_payments`, `wks_ap_giros` |
 
 ### Tabel pivot (many-to-many)
 - Format: `wks_<modul>_<singular_a>_<singular_b>` dua entitas **urut abjad**.
-- Contoh: `wks_adm_permission_role`, `wks_mst_spare_part_truck_type`.
+- Contoh: `wks_adm_permission_role`, `wks_ms_spare_part_truck_type`.
 
 ### Tabel sistem Laravel
 - Tabel bawaan Laravel (`users`, `migrations`, `jobs`, `cache`, dll.)
@@ -42,7 +43,7 @@ satu database dipakai bersama aplikasi lain, dan konsisten antar developer.
 - Primary key: `id` (`bigIncrements`).
 - **Multi-tenant:** setiap tabel milik tenant **wajib** kolom `company_id`
   (FK ke `wks_core_companies`), `not null`, ber-index. Tabel Core/sistem tidak.
-  Transaksi operasional juga membawa `branch_id` (FK `wks_mst_branches`).
+  Transaksi operasional juga membawa `branch_id` (FK `wks_ms_branches`).
   Unique constraint di-scope per company: `unique(company_id, <doc_no>)`.
   Hierarki: company → branch → warehouse. Detail lihat `docs/MODULES.md` §1 & §11.
 - Foreign key: `<singular>_id` → `customer_id`, `warehouse_id`, `work_order_id`.

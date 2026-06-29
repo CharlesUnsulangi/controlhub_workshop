@@ -26,8 +26,8 @@ Alur bangun fitur → `workshop-feature/SKILL.md`. JANGAN duplikasi isi file itu
 ## Constraint & Integritas
 - **Soft delete + unique** → pakai *partial unique index* agar baris terhapus tak bentrok:
   ```php
-  DB::statement('CREATE UNIQUE INDEX wks_mst_customers_company_code_uq
-                 ON wks_mst_customers (company_id, code) WHERE deleted_at IS NULL');
+  DB::statement('CREATE UNIQUE INDEX wks_ms_customers_company_code_uq
+                 ON wks_ms_customers (company_id, code) WHERE deleted_at IS NULL');
   ```
 - **FK on delete**: master = `restrict` (cegah hapus saat dipakai) + softDeletes;
   baris anak/detail = `cascade` ke induk.

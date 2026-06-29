@@ -3,7 +3,7 @@
 > Perencanaan (v0.1). Selaras dengan `MODULES.md`. Tiga surface:
 > **(A) System/Core** untuk super admin penyedia aplikasi, **(B) App Tenant** untuk
 > pengguna bengkel (scoped `company_id`, dengan pemilih **branch**), **(V) Portal Supplier**
-> (`/vendor`, fase berikutnya) untuk supplier eksternal (scoped `supplier_id`).
+> (`/vendor`, web supplier isi Surat Jalan; feature-flag) untuk supplier eksternal (scoped `supplier_id`).
 
 Konvensi route: prefix mengikuti sub-prefix modul (`/inv`, `/po`, `/lkm`, `/svc`,
 `/tyre`, `/admin`). Nama route: `wks.<area>.<resource>.<action>` (lihat NAMING_CONVENTIONS §5).
@@ -55,11 +55,25 @@ Menu user: Profil · Ubah Password · Logout
    • Omzet ringkas · piutang · ban perlu rotasi
 ```
 
+### B.2a PMB — Permintaan Mobil Masuk (panel terpisah, `/pmb`)
+Peran: **Dispatcher saja**. Aktif hanya pada mode `lkm_intake_mode = dispatcher_permit`.
+PMB = pengantar dari pos Dispatcher; **independen** dari LKM (lihat PANELS §2b).
+```
+/pmb                               Antrian PMB aktif (status=issued, branch)
+/pmb/create                        Form Dispatcher: cocokkan truck/plat + sopir, keluhan → Terbitkan (issued)
+/pmb/{id}                          Detail PMB (+ telusur LKM terkait bila used)
+   ├─ .../print                    Cetak PMB (surat bernomor → dibawa driver ke gate)
+   └─ .../cancel                   Batalkan (note wajib → cancelled)
+```
+
 ### B.2 LKM — Laporan Kendaraan Masuk  (`/app/lkm`)
-Peran: ServiceAdvisor, Gate/Satpam, Admin
+Peran: ServiceAdvisor (Service Officer), Gate/Satpam, Admin
+Dua mode (setting company `lkm_intake_mode`): `direct` / `dispatcher_permit`.
 ```
 /app/lkm                           Daftar kendaraan masuk (filter status/tanggal/branch)
-/app/lkm/create                    Buat LKM (pilih customer+unit, KM, keluhan)
+/app/lkm/create                    Buat LKM (input KM, keluhan, inspeksi)
+   ├─ ?pmb=cari                    (mode dispatcher) Cari/rujuk PMB issued (no PMB/plat/scan) → prefill + set pmb_id, PMB→used
+   └─ (mode direct)               input manual truk+customer (pmb_id null)
 /app/lkm/{id}                      Detail LKM
    ├─ .../inspection               Checklist inspeksi awal + foto
    ├─ .../to-work-order            Buat Work Order dari LKM
@@ -72,8 +86,9 @@ Peran: ServiceAdvisor, KepalaMekanik, Mekanik, Kasir, Admin
 /app/svc/work-orders               Daftar Work Order (papan status / kanban)
 /app/svc/work-orders/create        Buat WO
 /app/svc/work-orders/{id}          Detail WO
-   ├─ .../estimate                 Estimasi (jasa + part + ban)
-   ├─ .../items                    Item pekerjaan & part (request ke gudang)
+   ├─ .../items                    Item biaya (jasa/part/ban) — AKTUAL, tanpa estimasi biaya (fase sekarang)
+   ├─ .../plan                     WO Plan: task + langkah/step per task (salin template jasa)
+   │     └─ .../plan/tasks/{tid}/steps  Kelola langkah (seq, planned/adhoc)
    ├─ .../mechanics                Penugasan mekanik & jam kerja
    └─ .../qc                       QC & penyelesaian
 /app/svc/pm                        Servis Berkala (PM)
@@ -94,10 +109,10 @@ Peran: Gudang, Admin · *(Mekanik: usul pengeluaran · ServiceAdvisor: review)*
    ├─ /app/inv/parts/create        + cross-ref nomor pabrikan (Hino/Isuzu) & brand
    ├─ /app/inv/parts/{id}          Detail: part-numbers, kartu stok (per kondisi)
    └─ /app/inv/parts/search        Cari by nomor pabrikan/brand → resolve ke SKU
-/app/inv/sessions                  Sesi Kerja Gudang (Opening/Closing) — buka/tutup per operator
-   ├─ /app/inv/sessions/open        Buka Sesi (snapshot saldo awal gudang)
+/app/inv/sessions                  Sesi Kerja Gudang — 1 siklus/hari per gudang (gate masuk panel)
+   ├─ /app/inv/sessions/open        Buka Sesi (operator; snapshot saldo awal) — WAJIB sebelum pakai panel
    ├─ /app/inv/sessions/{id}        Detail: ringkasan mutasi + saldo awal→akhir + anomali
-   └─ /app/inv/sessions/{id}/close  Tutup Sesi (snapshot saldo akhir + update gudang)
+   └─ /app/inv/sessions/{id}/close  Tutup Sesi (**hanya Kepala Gudang/Supervisor**; snapshot akhir + update gudang)
 /app/inv/stock                     Stok per gudang/lokasi rak & kondisi (baru/bekas)
    └─ filter: warehouse · rak · condition (new/used/rebuilt)
 /app/inv/locations                 Setting Rak/Lokasi (pohon hierarki: area/zona/rak → bin)
@@ -109,18 +124,38 @@ Peran: Gudang, Admin · *(Mekanik: usul pengeluaran · ServiceAdvisor: review)*
    ├─ /app/inv/part-issues/create  Usul oleh Mekanik (qty diminta per part)
    ├─ /app/inv/part-issues/{id}/review   Review Service Officer (approve/reject, potong qty)
    └─ /app/inv/part-issues/{id}/issue    Keluarkan oleh Gudang (movement out, HPP→WO)
-/app/inv/movements                 Pergerakan stok (in/out/transfer/adjustment)
-/app/inv/transfers                 Transfer antar gudang
-/app/inv/teardown                  Penerimaan part bekas (copotan/teardown → stok used)
-/app/inv/delivery-orders           Surat Jalan (barang keluar)
+/app/inv/movements                 Pergerakan stok (ledger: in/out/transfer/adjustment/loan/retur)
+/app/inv/relocate                  ④ Mutasi/Relokasi dalam gudang (bin↔bin) — transfer
+/app/inv/transfers                 ④ Transfer antar gudang
+/app/inv/teardown                  ③ Penerimaan part bekas (copotan/teardown → stok used)
+/app/inv/loans                     ⑤ Peminjaman part (storing keluar, WAJIB kembali)
+   ├─ /app/inv/loans/create        Pinjam keluar (loan_out)
+   ├─ /app/inv/loans/{id}/return   Terima kembali (loan_return, sebagian/penuh)
+   └─ /app/inv/loans/{id}/convert  Konversi → Bon (bila tak kembali → pemakaian/HPP)
+/app/inv/adjustments               ⑥ Masukkan temuan / penyesuaian (adjustment, reason found)
+/app/inv/purchase-returns          ⑦ Retur ke supplier (ref PO/GRN) → nota retur (potong tagihan AP)
+   ├─ /app/inv/purchase-returns/create
+   └─ /app/inv/purchase-returns/{id}    Post (return_supplier) → credited
+/app/inv/issue-returns             ⑧ Retur Bon (part baru tak jadi pakai → kembali, reverse HPP WO)
+/app/inv/receiving                 PENERIMAAN dari supplier (barang tiba di gudang) — tulis di sini
+   ├─ /app/inv/receiving/supplier-deliveries   Surat Jalan MASUK supplier (per PO; verifikasi saat tiba)
+   ├─ /app/inv/receiving/grn/create            Serah Terima/GRN (WAJIB pilih PO + rujuk SJ) → tally
+   └─ /app/inv/receiving/grn/{id}              Detail GRN + Post (StockService in + WAC)
+/app/inv/delivery-orders           Surat Jalan (barang KELUAR — transfer/issue/retur internal)
    ├─ /app/inv/delivery-orders/create   (transfer/issue/retur supplier)
    └─ /app/inv/delivery-orders/{id}     Detail + cetak + tally muat
 /app/inv/tally                     Tally Sheet (verifikasi fisik DO & serah terima)
 /app/inv/opname                    Stock opname
    ├─ /app/inv/opname/create
    └─ /app/inv/opname/{id}         Input hitung fisik → adjustment
+/app/inv/audit                     AUDIT GUDANG → **panel terpisah `/audit`** (peran Auditor, independen)
+   ├─ /app/inv/audit/audits        Audit formal (cycle/spot/full/compliance) — jadwalkan & jalankan
+   │     └─ .../{id}/items         Cek fisik independen (book vs counted) → buat temuan
+   ├─ /app/inv/audit/findings      Temuan (severity/status) → tindak lanjut → verifikasi auditor
+   ├─ /app/inv/audit/trail         Audit Trail (read-only: movement ledger + core audit logs, filter)
+   └─ /app/inv/audit/anomalies     Review Anomali (stok negatif/selisih sesi) → Promosikan jadi Temuan
 /app/inv/sales                     Penjualan part eceran (over-the-counter)  (future/dormant)
-/app/inv/reports                   Laporan: stok kritis · slow moving · valuasi · baru vs bekas
+/app/inv/reports                   Laporan: stok kritis · slow moving · valuasi · baru vs bekas · rekap temuan audit
 ```
 
 ### B.5 Gudang Ban (Tyre)  (`/app/tyre`)
@@ -130,33 +165,34 @@ Peran: Gudang/GudangBan, Mekanik, Admin
 /app/tyre/tyres                    Daftar unit ban per serial (filter merek/ukuran/status/kondisi)
    ├─ /app/tyre/tyres/create       Registrasi unit ban (serial unik, model, DOT, lokasi)
    └─ /app/tyre/tyres/{id}         Detail + riwayat instalasi/inspeksi/retread + biaya/KM
-/app/tyre/stock                    Stok ban per gudang/lokasi (rak/bin)
-/app/tyre/installations            Instalasi / rotasi (pasang-lepas di posisi unit)
+/app/tyre/stock                    Stok ban per gudang/tahap (baru/bekas/afkir) & lokasi
+/app/tyre/receive                  ① Terima ban dari supplier — pilih SJ supplier (portal/manual) → GRN ber-PO → receipt (registrasi serial), Gudang Ban Baru
+/app/tyre/installations            ②/③ Instalasi / rotasi (pasang-lepas) — lepas layak → stok used (Gudang Bekas)
    └─ /app/tyre/trucks/{id}/layout Diagram posisi ban pada unit (per axle config)
-/app/tyre/inspections              Inspeksi tread depth & tekanan (+ rekomendasi)
+/app/tyre/inspections              Inspeksi tread depth & tekanan (+ rekomendasi / usul afkir)
 /app/tyre/retreads                 Vulkanisir (kirim/terima + biaya)
+/app/tyre/condemn                  ④ Konfirmasi Afkir (status afkir) — HANYA Kepala Gudang/Supervisor (tyre.condemn)
+/app/tyre/transfer-afkir           ⑤ Pindah ke Gudang Afkir (movement transfer)
 /app/tyre/opnames                  Opname ban (cek kehadiran per serial)
 /app/tyre/alerts                   Peringatan ban (tread/inspeksi/retread/DOT/stok)
-/app/tyre/disposals                Scrap disposal (lot jual/buang ban afkir)
+/app/tyre/disposals                ⑥ JUAL AFKIR / buang (lot, dari Gudang Afkir → proceeds)
 /app/tyre/reports                  Biaya per KM · ban perlu ganti/rotasi
 ```
 > Sesi Kerja Gudang **terpadu** dgn sparepart (`/app/inv/shift-sessions`) — gudang `type=both`:
 > satu Buka/Tutup Sesi mencakup mutasi part & ban.
 
 ### B.6 Purchasing  (`/app/po`)
-Peran: Purchasing, Gudang, Admin (approval: Owner/Admin)
+Peran: Purchasing, Admin (approval: Owner/Admin). **Penerimaan/GRN dikerjakan di Gudang**
+(`/app/inv/receiving`) — di sini SJ supplier/GRN **read-only** untuk pantau pemenuhan PO.
 ```
 /app/po/requests                   Purchase Request (opsional)
 /app/po/orders                     Daftar Purchase Order
    ├─ /app/po/orders/create
    └─ /app/po/orders/{id}          Detail + approval + status
-/app/po/supplier-deliveries        Surat Jalan MASUK dari supplier (per PO)
-   ├─ /app/po/supplier-deliveries/create   Daftarkan SJ (staf; supplier via portal /vendor)
-   └─ /app/po/supplier-deliveries/{id}     Detail SJ + item dikirim
-/app/po/receipts                   Serah Terima / GRN (WAJIB pilih PO)
-   ├─ /app/po/receipts/create      pilih PO (+ opsional SJ masuk) → input penerimaan
-   ├─ .../tally                    Tally sheet (hitung fisik bongkar)
-   └─ .../post                     Posting → tambah stok (StockService)
+/app/po/supplier-deliveries        Surat Jalan MASUK supplier (per PO) — READ-ONLY (tulis di Gudang /app/inv/receiving)
+   └─ /app/po/supplier-deliveries/{id}     Detail SJ (pantau pemenuhan PO)
+/app/po/receipts                   Serah Terima / GRN per PO — READ-ONLY (status & qty diterima)
+   →  buat/tally/post GRN ada di Gudang: /app/inv/receiving/grn/*
 /app/po/reports                    Riwayat pembelian per part/supplier
 ```
 
@@ -206,6 +242,46 @@ Peran: Owner, Admin
    └─ /app/admin/notifications/log  Riwayat kirim (outbox: terkirim/gagal)
 ```
 
+### B.10 Kontrabon — Hutang Supplier / AP (panel terpisah, `/kontrabon`)
+Peran: **Finance/AP** (approver ≠ verifikator). Modul `wks_ap_` (PANELS §7). Hilir PO→GRN.
+```
+/kontrabon                          Daftar kontrabon (filter status/supplier/jatuh tempo)
+/kontrabon/create                   Buat kontrabon: pilih supplier + tanggal terima + jatuh tempo
+/kontrabon/{id}                     Detail kontrabon (tanda terima tagihan)
+   ├─ .../invoices                  Baris tagihan (salin 1..n faktur supplier: no faktur/faktur pajak/nilai/PPN, rujuk GRN/PO)
+   │     └─ .../{lid}/check         Cek satu per satu: ☑ barang diterima · ☑ surat jalan · ☑ faktur pajak · ☑ PO & nominal → ok/problem
+   ├─ .../verify                    Verifikasi (gate: semua baris ok → verified)
+   ├─ .../approve                   Approve → hutang diakui (SoD: approver ≠ verifikator)
+   └─ .../reject                    Tolak/sengketa (rejected + alasan → kembali ke supplier)
+/kontrabon/aging                    Aging hutang per supplier (bucket umur, outstanding)
+/kontrabon/due                      Kontrabon jatuh tempo (umpan ke Kasir)
+```
+
+### B.11 Kasir — Pembayaran Supplier / AP (panel terpisah, `/kasir`)
+Peran: **Kasir**. Kelola rekening, request pembayaran (maker→checker), realisasi giro/digital atas
+kontrabon `approved`. ⚠️ AP (supplier), bukan kasir customer.
+```
+/kasir                              Dashboard kas (jatuh tempo, request menunggu approve, kas keluar)
+/kasir/bank-accounts                Master Rekening Bank/Kas (bank/tunai; supports giro/digital)
+   └─ /kasir/bank-accounts/{id}     Detail rekening
+/kasir/payment-requests             Request Pembayaran (maker→checker)
+   ├─ /kasir/payment-requests/create   Maker: pilih supplier + kontrabon jatuh tempo + metode + rekening
+   │     └─ .../allocations            Alokasi ke 1/banyak kontrabon (partial; anti over-pay)
+   ├─ /kasir/payment-requests/{id}/submit    Ajukan (submitted)
+   └─ /kasir/payment-requests/{id}/approve   Checker approve/reject (SoD: ≠ pengaju)
+/kasir/payments                     Realisasi pembayaran (eksekusi request approved)
+   ├─ /kasir/payments/create        Transfer/Digital (digital_ref) → Post; atau Giro → Register Giro
+   └─ /kasir/payments/{id}/post     Post → settle hutang (paid_amount↑, status kontrabon)
+/kasir/giros                        Register Giro (kontrol sebelum tanda tangan)
+   ├─ /kasir/giros/create           Register giro di aplikasi (no/nilai/jatuh tempo/atas nama) — registered
+   ├─ /kasir/giros/{id}/print       Cetak lembar register/voucher → printed (lalu giro fisik ditandatangani)
+   ├─ /kasir/giros/{id}/sign        Tandai ditandatangani (signed)
+   ├─ /kasir/giros/{id}/verify      Verifikasi: giro fisik vs sistem (lewat print) → verified
+   ├─ /kasir/giros/{id}/release     Serahkan ke supplier → released (payment posted)
+   └─ /kasir/giros/{id}/clear       Tandai cair (cleared) / bounce (gagal cair)
+/kasir/cash-out                     Rekap kas keluar per rekening/metode/periode + daftar giro
+```
+
 ### B.9 Laporan (lintas modul)  (`/app/reports`)
 Peran: Owner, Admin, (sebagian) Kasir
 ```
@@ -220,22 +296,24 @@ Peran: Owner, Admin, (sebagian) Kasir
 
 ---
 
-## V. PORTAL SUPPLIER  (`/vendor`) — *fase berikutnya (feature-flag)*
+## V. PORTAL SUPPLIER  (`/vendor`) — Web Supplier Isi Surat Jalan *(feature-flag)*
 Peran: **Supplier** (akun di `users` + `supplier_id`; panel Filament terpisah).
+**Tujuan: supplier isi SJ sendiri (part & ban) → operator gudang tak menyalin.**
 Scope ketat: hanya data milik `supplier_id` sendiri (+ company). **Read** PO yang ditujukan
 padanya; **tulis** Surat Jalan miliknya saja.
 ```
 /vendor/login                      Login supplier (akun undangan)
-/vendor/dashboard                  Ringkasan PO aktif & SJ
+/vendor/dashboard                  Ringkasan PO aktif & status SJ/penerimaan
 /vendor/purchase-orders            Daftar PO ke supplier ini (read-only)
-   └─ /vendor/purchase-orders/{id} Detail PO (item, qty, status penerimaan)
-/vendor/deliveries                 Surat Jalan yang didaftarkan supplier
-   ├─ /vendor/deliveries/create    Buat SJ atas PO (pilih PO → qty kirim per item)
+   └─ /vendor/purchase-orders/{id} Detail PO (item part/ban, qty, status penerimaan)
+/vendor/deliveries                 Surat Jalan yang diisi supplier (part & ban)
+   ├─ /vendor/deliveries/create    Buat SJ atas PO (supplier_do_no + item part/ban + qty kirim) → Submit
    └─ /vendor/deliveries/{id}      Detail + status (submitted/received)
 /vendor/profile                    Profil & kontak supplier
 ```
-> Entri SJ awalnya oleh staf di `/app/po/supplier-deliveries` (`source=manual`); portal ini
-> mengaktifkan supplier mengisi sendiri (`source=portal`). Dibangun setelah core internal.
+> **Alur ringan:** supplier Submit SJ (`source=portal`) → barang tiba → operator Gudang **GRN
+> pilih SJ** + tally (tak ketik ulang). Ban: SJ = product+qty, **serial diregistrasi saat GRN**.
+> Fallback tanpa portal: staf isi di `/app/inv/receiving/supplier-deliveries` (`source=manual`).
 
 ---
 
@@ -245,13 +323,18 @@ padanya; **tulis** Surat Jalan miliknya saja.
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | /system (Core) | ✅ | – | – | – | – | – | – | – |
 | Dashboard | – | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| PMB (pengantar dispatcher) | – | ✅ | ✅ | – | – | – | – | – |
 | LKM | – | ✅ | ✅ | ✅ | – | – | – | – |
 | Servis/WO | – | ✅ | ✅ | ✅ | ✅ | – | – | r |
 | Invoice/Payment | – | ✅ | ✅ | r | – | – | – | ✅ |
 | Gudang Sparepart | – | ✅ | ✅ | r | r | ✅ | r | – |
+| Penerimaan (SJ supplier + GRN) | – | ✅ | ✅ | – | – | ✅ | r | – |
+| Audit Gudang (kontrol) | – | r | r | – | – | – | – | – |
 | Gudang Ban | – | ✅ | ✅ | r | ✅ | ✅ | – | – |
 | Price List (supplier) | – | ✅ | ✅ | – | – | r | ✅ | – |
-| Purchasing | – | ✅ | ✅ | – | – | r | ✅ | – |
+| Purchasing (PO) | – | ✅ | ✅ | – | – | r | ✅ | – |
+| Kontrabon (Hutang Supplier/AP) | – | ✅ | ✅ | – | – | – | r | r |
+| Kasir — Bayar Supplier (AP) | – | ✅ | ✅ | – | – | – | – | ✅ |
 | Master Data | – | ✅ | ✅ | r | – | r | r | – |
 | Admin/Pengaturan | – | ✅ | ✅ | – | – | – | – | – |
 | Laporan | – | ✅ | ✅ | – | – | r | r | r |
@@ -261,6 +344,16 @@ padanya; **tulis** Surat Jalan miliknya saja.
 > **Catatan peran khusus:** **Supplier** tidak ada di matriks ini — aksesnya **hanya** di
 > surface **V. Portal Supplier** (`/vendor`), scoped `supplier_id`. Pada **Pengeluaran Sparepart**
 > (`/app/inv/part-issues`): Mekanik *usul*, Service Advisor *review/approve*, Gudang *issue*.
+> **Auditor** (peran khusus, tak berkolom) = **Internal Audit** di **panel terpisah `/audit`**:
+> **read** stok/dokumen + **tulis** audit/temuan + verifikasi; **independen** (operator/Kepala
+> Gudang = subjek audit, tak menulis audit). Audit **tak mengubah stok**.
+> **Dispatcher** (peran khusus, tak berkolom) = **penerbit PMB** (panel terpisah `/pmb`)
+> pada mode `dispatcher_permit`; **SoD:** Dispatcher terbitkan PMB ≠ Service Officer
+> (Service Advisor) buat LKM. PMB independen — tidak auto-terbit LKM.
+> **Finance/AP** (peran khusus, tak berkolom) = **Kontrabon** (panel terpisah `/kontrabon`):
+> verifikasi & approve faktur supplier (akui hutang). **Kasir** = **bayar supplier** (panel
+> `/kasir`). **SoD AP:** verifikator ≠ approver (di Kontrabon) ≠ pembayar (Kasir). Kontrabon &
+> Kasir = modul Hutang Supplier `wks_ap_` (PANELS §7–§9).
 
 ---
 
@@ -273,6 +366,9 @@ padanya; **tulis** Surat Jalan miliknya saja.
 - **Aksi cepat** di dashboard: "+ LKM", "+ Work Order", "+ PO".
 - Mobile/tablet (mekanik & gudang) cukup akses: WO, request part, instalasi ban,
   opname — pertimbangkan layout ringkas (roadmap Fase mobile).
+  - **Mekanik:** antarmuka UTAMA = **PWA mobile-first** (update pekerjaan: clock in/out,
+    checklist langkah, usul Bon, pasang ban); panel Filament Mekanik = view supervisor.
+    Fase 1 online-first, siap offline. Detail → `MOBILE_MEKANIK.md` / `PANELS.md §4b`.
 - **Mode internal:** menu bertanda *(future/dormant)* — penjualan part, invoice,
   pembayaran — disembunyikan via feature-flag sampai fitur penjualan diaktifkan.
 ```

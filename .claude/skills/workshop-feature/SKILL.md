@@ -78,8 +78,8 @@ jangan update langsung tanpa mencatat movement.
 
 ```bash
 php artisan make:model Truck -mf         # model + migration + factory
-# NB: setelah generate, ganti nama tabel di migration jadi wks_mst_trucks
-#     dan set protected $table = 'wks_mst_trucks'; di model.
+# NB: setelah generate, ganti nama tabel di migration jadi wks_ms_trucks
+#     dan set protected $table = 'wks_ms_trucks'; di model.
 php artisan make:filament-resource Truck --generate   # Filament CRUD (form+table)
 php artisan make:policy TruckPolicy --model=Truck
 php artisan shield:generate --all        # permission RBAC (Filament Shield)

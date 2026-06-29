@@ -32,7 +32,7 @@ visibilitas penuh atas pendapatan, biaya, stok, dan performa.
 
 **Target pengguna**
 - Pemilik / manajer bengkel (performa, laporan, profitabilitas)
-- Service advisor / front desk (terima unit, estimasi, koordinasi armada)
+- Service advisor / front desk (terima unit, co-susun rencana kerja, koordinasi armada)
 - Kepala mekanik & mekanik / teknisi (kerjakan work order)
 - **Petugas gudang / warehouse** (terima barang, pick part, stock opname)
 - Bagian pembelian / purchasing (PO ke supplier)
@@ -100,10 +100,21 @@ visibilitas penuh atas pendapatan, biaya, stok, dan performa.
 
 ### 3.6 Pembelian / Purchasing
 - Master supplier + harga & lead time
-- **Purchase Order (PO)** → penerimaan (GRN) → hutang dagang (opsional)
+- **Purchase Order (PO)** → penerimaan (GRN)
 - Riwayat pembelian per part / supplier
 
-### 3.7 Penagihan & Pembayaran
+### 3.6b Hutang Supplier (Kontrabon & Kasir) — Accounts Payable (`wks_ap_`)
+- **Kontrabon** — dokumen yang kita buat untuk **menyalin tagihan supplier** ("tukar faktur"),
+  lalu **review & cocokkan satu per satu**: ☑ barang diterima (GRN) · ☑ surat jalan ·
+  ☑ faktur pajak (PPN) · ☑ PO & nominal cocok. Satu kontrabon bisa memuat **1..n** faktur.
+- **Verifikasi → Approve** (SoD: verifikator ≠ approver) → **hutang (AP)** + jatuh tempo + aging.
+- **Kasir** — kelola **rekening bank/kas**, buat **Request Pembayaran** (maker→checker),
+  realisasi ke supplier via **digital banking / giro** (+ transfer/tunai), **alokasi** ke 1/banyak
+  kontrabon (partial). **Giro:** register di aplikasi → print → tanda tangan → verifikasi (fisik
+  harus sesuai sistem, dicek lewat print) → serah → cair. Panel `/kontrabon` (Finance/AP) & `/kasir` (Kasir).
+- ⚠️ Ini **hutang ke supplier** (aktif, sah) — beda dari **penagihan ke customer** (§3.7, future).
+
+### 3.7 Penagihan & Pembayaran Customer *(future/dormant — mode internal)*
 - Invoice dari work order (jasa + part) atau penjualan part
 - **Invoice konsolidasi armada** (gabungkan banyak WO per pelanggan/termin)
 - Pajak (PPN), diskon, metode pembayaran, piutang & jatuh tempo
@@ -123,7 +134,8 @@ visibilitas penuh atas pendapatan, biaya, stok, dan performa.
 
 ### 3.10 Pengaturan & Pengguna
 - Multi-user dengan peran (RBAC): Owner, Admin, Service Advisor, Kepala Mekanik,
-  Mekanik, **Petugas Gudang, Purchasing**, Kasir
+  Mekanik, **Petugas Gudang, Kepala Gudang/Supervisor (tutup sesi), Auditor (audit gudang),
+  Purchasing, Finance/AP (Kontrabon — verifikasi/approve hutang supplier)**, Kasir (bayar supplier)
 - Profil bengkel, pajak, penomoran dokumen, daftar gudang & lokasi rak
 
 ---
@@ -133,14 +145,17 @@ visibilitas penuh atas pendapatan, biaya, stok, dan performa.
 ### Alur Servis Unit
 ```
 1. Unit truk masuk (atau dari reminder PM jatuh tempo)
+   └─ mode `dispatcher_permit`: Dispatcher terbitkan PMB (pengantar) dulu → Service Officer
+      buat LKM merujuk PMB (PMB & LKM modul terpisah — lihat MODULES §16/§6)
 2. Service Advisor catat unit + keluhan + inspeksi   → Work Order (Antri)
-3. Buat estimasi (jasa + part) → pelanggan setuju
+3. Mekanik ambil WO → susun WO Plan (task + langkah), bisa bersama Service Officer
+   └─ ⚠️ fase sekarang TANPA estimasi biaya/penawaran — biaya dari pemakaian aktual
 4. Request part ke gudang
    ├─ stok ada   → gudang pick & potong stok          → Dikerjakan
    └─ stok kosong → buat PO ke supplier (Menunggu Part)
-5. Mekanik kerjakan, catat jam kerja
+5. Mekanik kerjakan, centang langkah plan, catat jam kerja
 6. Selesai → QC → status: Selesai
-7. Kasir buat Invoice (atau konsolidasi armada) → bayar / piutang
+7. Rekap biaya aktual per WO/unit (HPP) — *(Invoice/bayar pelanggan = future)*
 8. Unit diserahkan (surat jalan)                      → Diserahkan
 9. Update KM & jadwal PM berikutnya; masuk riwayat & laporan
 ```
@@ -171,8 +186,9 @@ Reorder point tercapai / WO butuh part
 | API (bila perlu) | Laravel API Resources (mis. integrasi) |
 
 **Pola:** aplikasi back-office berbasis **Filament** (2 panel inti: `App` untuk tenant,
-`System` untuk Core/super-admin; + panel **`Vendor`** `/vendor` untuk portal supplier —
-fase berikutnya, feature-flag). Logika bisnis di **Service class**; mutasi stok/uang
+`System` untuk Core/super-admin; + **web `Vendor`** `/vendor` tempat **supplier isi Surat
+Jalan sendiri** (part & ban) agar operator tak menyalin — feature-flag). Logika bisnis di
+**Service class**; mutasi stok/uang
 selalu dalam `DB::transaction()` lewat `StockService`. Detail di
 `.claude/skills/workshop-feature/SKILL.md`.
 
@@ -202,6 +218,11 @@ ShiftSession (operator: open→close, snapshot + anomali)
 Supplier  (1) ──< (N) PurchaseOrder ──< (N) POItem
 PurchaseOrder (1) ──< (N) SupplierDelivery (SJ masuk) ──< (N) GoodsReceipt (GRN) → StockMovement
 
+-- Hutang Supplier / AP (Kontrabon → Kasir) --
+Supplier  (1) ──< (N) Kontrabon ──< (N) KontrabonInvoice  >── (1) GoodsReceipt | PurchaseOrder  (cek satu per satu)
+BankAccount (1) ──< (N) PaymentRequest (maker→checker) ──< (N) PaymentRequestItem >── (1) Kontrabon
+PaymentRequest (1) ──< (N) ApPayment (realisasi → settle Kontrabon) ; ApPayment (giro) (1) ── (1) Giro (register→print→sign→verify→serah→cair)
+
 User ──> Role (RBAC) ; User ─(supplier_id)→ Supplier (portal /vendor)
 NotificationRule → Notification (WA/email/in-app)
 ```
@@ -209,8 +230,9 @@ NotificationRule → Notification (WA/email/in-app)
 Entitas inti: `Customer`, `Truck`, `PMSchedule`, `WorkOrder`, `WorkOrderItem`,
 `Service`, `SparePart`, `Warehouse`, `Location`, `StockItem`, `StockValue`,
 `StockMovement`, `PartIssue`, `CoreReturn`, `ShiftSession`, `Supplier`,
-`PurchaseOrder`, `POItem`, `SupplierDelivery`, `GoodsReceipt`, `NotificationRule`,
-`Invoice`, `Payment`, `Mechanic`, `User`, `Role`.
+`PurchaseOrder`, `POItem`, `SupplierDelivery`, `GoodsReceipt`, `Kontrabon`,
+`KontrabonInvoice`, `BankAccount`, `PaymentRequest`, `PaymentRequestItem`, `ApPayment`,
+`Giro`, `NotificationRule`, `Invoice`, `Payment`, `Mechanic`, `User`, `Role`.
 
 ---
 
@@ -218,7 +240,7 @@ Entitas inti: `Customer`, `Truck`, `PMSchedule`, `WorkOrder`, `WorkOrderItem`,
 
 **MVP (Fase 1) — operasional inti + gudang dasar**
 - Pelanggan (armada) & unit truk
-- Work order + estimasi + request part
+- Work order + WO Plan (task/langkah) + request part *(tanpa estimasi biaya di fase ini)*
 - Katalog jasa & master sparepart
 - Gudang: stok masuk/keluar + kartu stok + peringatan stok minimum
 - Invoice & pembayaran sederhana

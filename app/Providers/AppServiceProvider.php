@@ -1,0 +1,26 @@
+<?php
+
+namespace App\Providers;
+
+use App\Support\Tenancy;
+use Illuminate\Support\ServiceProvider;
+
+class AppServiceProvider extends ServiceProvider
+{
+    /**
+     * Register any application services.
+     */
+    public function register(): void
+    {
+        // Konteks tenant aktif: satu instance per request (sumber kebenaran).
+        $this->app->singleton(Tenancy::class);
+    }
+
+    /**
+     * Bootstrap any application services.
+     */
+    public function boot(): void
+    {
+        //
+    }
+}

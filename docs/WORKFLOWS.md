@@ -10,10 +10,12 @@ Daftar workflow:
 1. Provisioning Tenant (Core)
 2. Setup Awal Company (Admin & Master)
 3. Update Price List Supplier
-4. Pengadaan: PR → PO → GRN → Stok
+4. Pengadaan: PR → PO (Purchasing) → Penerimaan/GRN (Gudang) → Stok
 4b. Sinkronisasi Driver dari ControlHub HRD
-5. Kendaraan Masuk (LKM)
+4c. Hutang Supplier (AP): Kontrabon (faktur supplier) → Kasir (pembayaran)
+5. PMB (Pengantar Dispatcher) & Kendaraan Masuk (LKM)
 6. Servis / Work Order (alur utama)
+6b. Eksekusi Pekerjaan Mekanik (Handheld — clock in/out)
 7. Servis Berkala (PM)
 8. Siklus Hidup Ban (Tyre)
 8b. Penerimaan Part Bekas (Teardown / Copotan)
@@ -28,7 +30,7 @@ Daftar workflow:
 
 ## 1. Provisioning Tenant (Core)
 
-👤 SuperAdmin · 📄 `wks_core_companies`, `users`, `wks_mst_branches`, `wks_adm_roles`
+👤 SuperAdmin · 📄 `wks_core_companies`, `users`, `wks_ms_branches`, `wks_adm_roles`
 
 ```
 SuperAdmin buka /system/companies/create
@@ -45,7 +47,7 @@ Selesai → Admin company bisa login ke /app
 
 ## 2. Setup Awal Company (Admin & Master)
 
-👤 Owner/Admin · 📄 `wks_mst_*`, `wks_adm_*`, `users`
+👤 Owner/Admin · 📄 `wks_ms_*`, `wks_adm_*`, `users`
 
 ```
 1. Branch          → tambah cabang (/app/admin/branches)
@@ -58,7 +60,7 @@ Selesai → Admin company bisa login ke /app
 8. Pengaturan      → pajak (PPN), penomoran dokumen (document_sequences)
 Selesai → siap operasional
 ```
-⚙️ Penomoran dokumen (LKM/WO/PO/GRN) diatur di `wks_adm_document_sequences`.
+⚙️ Penomoran dokumen (PMB/LKM/WO/PO/GRN) diatur di `wks_adm_document_sequences`.
 
 ---
 
@@ -80,10 +82,12 @@ Buat/pilih price list per supplier (set currency, tax_type, tax_rate)
 
 ---
 
-## 4. Pengadaan: PR → PO → GRN → Stok
+## 4. Pengadaan: PR → PO (Purchasing) → Penerimaan/GRN (Gudang) → Stok
 
-👤 Purchasing, Gudang, approver Owner/Admin
+👤 **Purchasing** (PR/PO + approval, lalu read), **Gudang** (terima fisik + SJ supplier + GRN), approver Owner/Admin
 📄 `wks_po_*`, `wks_inv_stock_movements`/`stock_items`, `wks_tyre_tyres`/`movements`
+⚙️ **SoD:** PO dibuat/di-approve di **Purchasing**; **barang tiba & diterima di GUDANG**
+(SJ supplier + GRN + posting). Purchasing **lihat-saja** status SJ/GRN untuk pantau PO.
 
 ```
 (opsional) Purchase Request          🔁 PR: draft → submitted
@@ -95,12 +99,14 @@ Purchase Order (pilih supplier)      🔁 PO: draft
    • harga & pajak DI-SNAPSHOT ke wks_po_order_items
         │ approval
         ▼                            🔁 PO: approved
-(opsional) SURAT JALAN MASUK dari supplier (📄 wks_po_supplier_deliveries)
-   • supplier daftarkan via portal /vendor (source=portal) ATAU staf input (source=manual)
-   • atas PO; isi supplier_do_no + qty_shipped per baris   🔁 SJ: submitted
+SURAT JALAN MASUK dari supplier (📄 wks_po_supplier_deliveries) — sparepart & BAN
+   • 👤 SUPPLIER isi SJ sendiri di web /vendor (source=portal) → operator TAK menyalin
+     (fallback: staf input source=manual)
+   • atas PO; supplier_do_no + item (part/ban) + qty_shipped per baris   🔁 SJ: submitted
+   • ban: hanya product+qty; serial diregistrasi nanti saat GRN
         │
         ▼
-Barang datang → SERAH TERIMA (GRN, WAJIB pilih PO)  🔁 GRN: draft
+Barang tiba DI GUDANG → 👤 Operator Gudang SERAH TERIMA (GRN, WAJIB pilih PO)  🔁 GRN: draft
    • tarik baris dari PO (qty_doc); rujuk SJ masuk (supplier_delivery_id) bila ada,
      selain itu isi do_supplier_no manual (fallback)        🔁 SJ: received
         │ hitung fisik
@@ -124,7 +130,7 @@ Barang datang → SERAH TERIMA (GRN, WAJIB pilih PO)  🔁 GRN: draft
 
 ## 4b. Sinkronisasi Driver dari ControlHub HRD
 
-👤 Admin · 📄 `wks_mst_drivers` · ⚙️ `HrdGateway` (feature-flag integrasi)
+👤 Admin · 📄 `wks_ms_drivers` · ⚙️ `HrdGateway` (feature-flag integrasi)
 
 ```
 Aktifkan integrasi HRD (config/integrations.php: base_url, token, mapping company)
@@ -132,7 +138,7 @@ Aktifkan integrasi HRD (config/integrations.php: base_url, token, mapping compan
   → tarik "Mitra Kerja" berperan driver dari HRD (per hrd_company_id yang dipetakan)
   → untuk tiap mitra kerja:
        ├─ sudah ada (match hrd_mitra_id) → update field inti (read-only) + hrd_synced_at
-       └─ baru → buat wks_mst_drivers (source=hrd, hrd_mitra_id, hrd_company_id)
+       └─ baru → buat wks_ms_drivers (source=hrd, hrd_mitra_id, hrd_company_id)
   → driver source=manual TIDAK ditimpa
 ```
 ⚙️ Driver di HRD = entitas **"Mitra Kerja"**; HRD = system of record, Workshop kelola
@@ -142,13 +148,103 @@ Aktifkan integrasi HRD (config/integrations.php: base_url, token, mapping compan
 
 ---
 
-## 5. Kendaraan Masuk (LKM)
+## 4c. Hutang Supplier (AP): Kontrabon (faktur supplier) → Kasir (pembayaran)
 
-👤 ServiceAdvisor / Gate · 📄 `wks_lkm_entries`, `wks_lkm_inspections`, `wks_lkm_gateouts`
+👤 **Finance/AP** (Kontrabon: salin tagihan, cek satu per satu, approve) · **Kasir** (rekening, request bayar maker→checker, realisasi) · approver ≠ verifikator · pengaju request ≠ checker
+📄 `wks_ap_kontrabons`/`_invoices`, `wks_ap_bank_accounts`, `wks_ap_payment_requests`/`_items`, `wks_ap_payments`, ref `wks_po_goods_receipts`/`wks_po_orders`
+⚙️ Hilir **PO→GRN** (§4). **SoD lintas panel:** Finance/AP **akui** hutang (panel `/kontrabon`) ≠
+Kasir **bayar** (panel `/kasir`). Semua posting via **`ApService`** (`DB::transaction()`, idempoten).
+⚠️ Hutang ke **supplier** (sah, mode internal) — beda dari invoice **customer** (§11, future/dormant).
+🔑 **Kontrabon = dokumen KITA** menyalin tagihan supplier; 1 kontrabon (per supplier) bisa memuat **1..n** tagihan.
 
 ```
-Truk tiba → buat LKM (/app/lkm/create)        🔁 LKM: entered
-  • pilih truck (+ customer), entry_at, driver, km_in, keluhan
+GRN posted (§4) → barang & cost masuk; PO partial/received
+        │  supplier setor tagihan ("tukar faktur") — bisa beberapa faktur sekaligus
+        ▼
+👤 FINANCE/AP buat KONTRABON (📄 wks_ap_kontrabons; per supplier)   🔁 kontrabon: draft
+   • header: supplier, received_date, due_date (= +supplier.payment_term_days, boleh override)
+   • SALIN tiap tagihan jadi BARIS (📄 wks_ap_kontrabon_invoices, 1..n):
+        no faktur supplier + no Faktur Pajak (NSFP) + tanggal + nilai + PPN ; rujuk GRN/PO
+        │
+        ▼  REVIEW SATU PER SATU (cek tiap baris)                    🔁 kontrabon: checking
+   per baris → centang CHECKLIST (4):
+        ☑ barang sudah diterima (cocok GRN)   ☑ Surat Jalan
+        ☑ Faktur Pajak (PPN)                  ☑ PO & nominal cocok
+        ├─ keempat ☑ → baris check_status=ok
+        └─ ada kurang/selisih → problem (+ check_note) → tindak lanjut ke supplier
+        │ ✋ gate: semua baris ok?
+        ▼                                                            🔁 kontrabon: verified  (verified_by)
+👤 APPROVER (Finance) AKUI HUTANG                                    🔁 kontrabon: approved  (approved_by ≠ verified_by)
+   → ⚙️ ApService: hutang efektif = outstanding (= total − credit_amount − paid_amount)
+   ✋ hanya kontrabon approved/partially_paid yang bisa dibayar
+   • (opsional) NOTA RETUR supplier (§10c ⑦) → credit_amount↑ → outstanding↓
+        │ jatuh tempo → muncul di aging
+        ▼
+   [prasyarat Kasir] 👤 Kasir kelola MASTER REKENING (📄 wks_ap_bank_accounts: bank/kas, supports giro/digital)
+        │
+        ▼
+👤 KASIR (MAKER) buat REQUEST PEMBAYARAN (📄 wks_ap_payment_requests) — per supplier  🔁 request: draft
+   • pilih kontrabon approved jatuh tempo → ALOKASI (📄 wks_ap_payment_request_items, partial/banyak)
+   • pilih METODE (transfer/giro/digital) + REKENING sumber → submit  🔁 request: submitted
+   ✋ guard: Σ item = requested_amount ; amount ≤ outstanding per kontrabon (anti over-pay)
+        │
+        ▼  👤 CHECKER approve/reject (SoD: pengaju ≠ checker)         🔁 request: approved / rejected
+        │
+        ▼  eksekusi hanya bila request approved
+👤 KASIR REALISASI PEMBAYARAN (📄 wks_ap_payments; ref request)        🔁 payment: draft
+   ├─ TRANSFER/DIGITAL → input digital banking (maker-checker bank) / transfer → reference_no/digital_ref
+   │        │ Post → 🔁 payment: posted
+   └─ GIRO → REGISTER GIRO dulu (📄 wks_ap_giros)                      🔁 giro: registered
+            • input di APLIKASI sebelum tanda tangan (no, nilai, jatuh tempo, atas nama)
+            → 🖨️ PRINT lembar register/voucher (print_count++)         🔁 giro: printed
+            → ✍️ giro FISIK ditandatangani (signed_by, otorisasi)      🔁 giro: signed
+            → 🔍 PERIKSA: giro fisik HARUS SESUAI SISTEM (dicek lewat print) 🔁 giro: verified
+                  ✋ beda no/nilai/atas nama/jatuh tempo → tahan/perbaiki (tak boleh serah)
+            → giro DISERAHKAN ke supplier                              🔁 giro: released ; 🔁 payment: posted
+        │ payment posted
+        ▼                                                            🔁 request: paid
+   → ⚙️ ApService (transaksi): tiap item request → kontrabons.paid_amount↑
+        → outstanding habis → 🔁 kontrabon: paid ; sebagian → 🔁 kontrabon: partially_paid
+   • GIRO cair → 🔁 giro: cleared ; 🔁 payment: cleared
+        └─ gagal cair → 🔁 giro: bounced ; 🔁 payment: cancelled (hutang kembali outstanding)
+```
+⚙️ **SoD giro:** Kasir register (`registered_by`) ≠ penanda tangan (`signed_by`) ≠ pemeriksa
+(`verified_by`); print = alat kontrol cocokkan giro fisik vs sistem.
+⚙️ `outstanding` = kolom **GENERATED** (sumber kebenaran sisa hutang). **Aging** = group
+`outstanding` per supplier × bucket umur dari `due_date`.
+⚙️ Anti dobel-input faktur: `unique(company_id, supplier_id, supplier_invoice_no)` di baris.
+⚙️ Ada baris `problem`/sengketa → `kontrabon: rejected` (reject_reason) dikembalikan ke supplier; batal → `cancelled`.
+
+---
+
+## 5. PMB (Pengantar Dispatcher) & Kendaraan Masuk (LKM)
+
+👤 Dispatcher (PMB) / ServiceAdvisor·Service Officer (LKM) / Gate
+📄 `wks_pmb_requests` (PMB) · `wks_lkm_entries`, `wks_lkm_inspections`, `wks_lkm_gateouts` (LKM)
+
+⚙️ **PMB & LKM = modul/entitas terpisah** (PMB = pengantar dari pos Dispatcher; LKM = truk
+benar-benar masuk). **Dua mode** (setting company `lkm_intake_mode`, di Admin):
+
+**Mode `dispatcher_permit` (lewat pengantar):**
+```
+Driver datang ke pos Dispatcher → 👤 Dispatcher TERBITKAN PMB     🔁 PMB: issued
+  • Dispatcher: cocokkan truck_id/customer + sopir ke master · keluhan/tujuan · pmb_no (doc_type pmb)
+  → 🖨️ cetak PMB (surat bernomor) → driver bawa ke gate
+Truk tiba → 👤 Service Officer CARI REFERENSI PMB di sistem (by no PMB / plat / scan)
+  • cari PMB status=issued di branch aktif (bukan ketik ulang data)
+  → bila PMB ketemu: form LKM ter-prefill (truk · customer · sopir · keluhan), lengkapi km_in
+        → buat LKM merujuk PMB                                    🔁 LKM: entered
+        └─ ⚙️ PmbService: set PMB.status=used + used_lkm_id (transaksi, idempoten, anti dobel-pakai) 🔁 PMB: used
+  → bila PMB tak ketemu: belum/tak ada pengantar → SOP (driver kembali ke Dispatcher)
+  PMB tak jadi dipakai → 👤 Dispatcher BATALKAN (note wajib)      🔁 PMB: cancelled
+```
+**Mode `direct` (langsung masuk, tanpa PMB):**
+```
+Truk tiba → Gate/Satpam buat LKM (pmb_id null)   🔁 LKM: entered
+```
+**Lanjutan (kedua mode):**
+```
+  • LKM: pilih truck (+ customer), entry_at, driver, km_in, keluhan (rujuk pmb_id bila ada)
   → checklist inspeksi awal + foto (wks_lkm_inspections)
   → buat Work Order dari LKM                    🔁 LKM: in_progress
   ... (servis berjalan, lihat #6) ...
@@ -156,6 +252,7 @@ Truk tiba → buat LKM (/app/lkm/create)        🔁 LKM: entered
   → Gate-out: catat exit_at, km_out, surat jalan 🔁 LKM: exited
 ```
 ⚙️ `km_in` memperbarui `trucks.current_km`; dasar perhitungan PM.
+⚙️ SoD: Dispatcher menerbitkan PMB ≠ Service Officer membuat LKM. PMB **tidak** auto-terbit LKM.
 
 ---
 
@@ -166,13 +263,15 @@ Truk tiba → buat LKM (/app/lkm/create)        🔁 LKM: entered
 
 ```
 LKM → Work Order                               🔁 WO: queued
-  → estimasi/rencana: tambah item (jasa/part/ban) ke wks_svc_work_order_items
+  ⚠️ fase sekarang: TANPA estimasi biaya — biaya terbentuk dari pemakaian AKTUAL (lihat akhir §6)
+  → item biaya (jasa/part/ban) di wks_svc_work_order_items TERISI saat pemakaian aktual (bukan estimasi di depan)
   → BON PENGELUARAN SPAREPART (📄 wks_inv_part_issues, ref wo_id → lkm_id, truck_id)
         👤 Mekanik USUL (qty_requested)              🔁 issue: draft→submitted
         👤 Service Officer REVIEW (approve qty_approved / reject)  🔁 issue: approved/rejected
             └─ approved → ⚙️ StockService reserve (qty_reserved↑)  🔁 WO: in_progress
             └─ stok kurang → buat PR/PO (#4)                       🔁 WO: waiting_part
-  → mekanik kerjakan; catat jam kerja
+  → mekanik AMBIL/ditugaskan WO → SUSUN WO PLAN bersama (Mekanik + Service Officer):
+        TASK (wks_svc_wo_tasks) + LANGKAH/step (wks_svc_wo_task_steps; boleh dari template jasa) (lihat §6b)
   → PENGELUARAN/PEMAKAIAN part → 👤 Gudang issue → ⚙️ StockService:
         stock_movement (type=out, ref=part_issue, unit_cost=avg_cost) → qty_on_hand↓, reserved↓
         🔁 issue: issued/partially_issued
@@ -193,9 +292,45 @@ LKM → Work Order                               🔁 WO: queued
 
 ---
 
+## 6b. Eksekusi Pekerjaan Mekanik (Handheld — clock in/out)
+
+👤 Mekanik (ambil WO, susun plan, kerjakan) · Service Officer/KepalaMekanik (co-susun, tugaskan, supervisi)
+📄 `wks_svc_wo_tasks`, `wks_svc_wo_task_steps`, `wks_svc_task_assignments`, `wks_svc_task_time_logs` · ⚙️ `TaskTimeService`
+
+```
+WO siap dari LKM (TANPA estimasi biaya) → 👤 Mekanik AMBIL WO / ditugaskan   🔁 task: assigned
+SUSUN WO PLAN (👤 Mekanik, bisa BERSAMA Service Officer) — setelah ambil WO:
+  → pecah jadi TASK (apa yang dikerjakan)                      🔁 task: pending→assigned
+  → rinci LANGKAH/step tiap task — wks_svc_wo_task_steps       🔁 step: pending
+        (opsional disalin dari template jasa wks_svc_service_steps, lalu sesuaikan)
+MEKANIK di handheld (panel Filament responsif ATAU PWA offline):
+  → MULAI task → ⚙️ buka segmen time_log (started_at, ended_at=null)   🔁 task: in_progress
+        ✋ guard: 1 segmen aktif/mekanik (tak bisa 2 task sekaligus)
+  → CENTANG langkah satu per satu (done/skipped + catatan)     🔁 step: done/skipped
+  → (+) TAMBAH langkah ADHOC bila temukan kerja baru di lapangan (source=adhoc)
+  → JEDA (wait_part/break/qc/shift_end) → ⚙️ tutup segmen (ended_at, duration)  🔁 task: paused
+  → LANJUT → buka segmen baru                                   🔁 task: in_progress
+  → (butuh part) → Usul Bon ke gudang (alur #6); task.requires_part=true
+  → SELESAI → tutup segmen + isi result_note                   🔁 task: done
+        ⚙️ recompute wo_tasks.actual_minutes = Σ duration_minutes (labor)
+        ⚠️ bila masih ada langkah pending → UI peringatkan (boleh tetap done dgn catatan)
+  → (opsional) BATAL task                                       🔁 task: cancelled
+
+PWA OFFLINE: event (start/stop) diantre lokal dgn client_event_id (uuid)
+  → saat online → POST /api/svc/time-logs/sync (batch)
+  → ⚙️ server idempoten via unique(company_id, client_event_id); set synced_at
+  → konflik (overlap/segmen menggantung) → ditandai untuk ditinjau KepalaMekanik
+```
+⚙️ Timestamp **selalu dari server** (anti-manipulasi); klien hanya kirim event + waktu lokal (audit).
+⚙️ **WO `done`** mensyaratkan semua task `done`/`cancelled` (selain gate core-return §6/§8c).
+⚙️ Pengukuran: **labor-minutes** = Σ durasi (produktivitas/biaya) · **wall-clock** = rentang (turnaround).
+🔐 SoD: Mekanik susun/update plan task miliknya (scope assignment); tak bisa ubah biaya/tutup WO.
+
+---
+
 ## 7. Servis Berkala (Preventive Maintenance)
 
-👤 Sistem (terjadwal) + ServiceAdvisor · 📄 `wks_svc_pm_schedules`, `wks_mst_trucks`
+👤 Sistem (terjadwal) + ServiceAdvisor · 📄 `wks_svc_pm_schedules`, `wks_ms_trucks`
 
 ```
 Tiap unit punya jadwal PM (interval km / hours / days)
@@ -210,25 +345,31 @@ Tiap unit punya jadwal PM (interval km / hours / days)
 
 ## 8. Siklus Hidup Ban (Tyre)
 
-👤 Gudang/GudangBan, Mekanik · 📄 `wks_tyre_*`, `wks_mst_axle_positions`, `wks_inv_shift_sessions`
+👤 Gudang/GudangBan, Mekanik · 📄 `wks_tyre_*`, `wks_ms_axle_positions`, `wks_inv_shift_sessions`
 ⚙️ Semua mutasi via **TyreService** (DB::transaction) — **wajib Sesi Kerja Gudang terpadu** (di-tag).
 
 ```
-Terima dari GRN (#4) → unit ban dibuat per serial   🔁 tyre: in_stock  (movement receipt, acquired_cost)
+3 TAHAP GUDANG: [Gudang Ban Baru] → [Gudang Bekas] → [Gudang Afkir]
+
+① Terima dari GRN (#4) → unit ban dibuat per serial   🔁 tyre: in_stock new @ GUDANG BAN BARU  (receipt, acquired_cost)
         → simpan di lokasi/bin (location_id)
-  → pasang ke truk → ⚙️ validasi posisi vs axle_positions 🔁 tyre: installed  (movement install)
+② pasang ke truk → ⚙️ validasi posisi vs axle_positions 🔁 tyre: installed  (movement install)
         → wks_tyre_installations (removed_at=null)   🔒 partial-unique: 1 ban/slot
-  → inspeksi berkala (tread, pressure) → rekomendasi  📄 tyre_inspections
+   inspeksi berkala (tread, pressure) → rekomendasi  📄 tyre_inspections
         → tread < min_tread_mm → ⚠️ wks_tyre_alerts (tread_low)
-  → lepas (km_remove, removal_reason) → tutup instalasi 🔁 tyre: removed  (movement removal)
+③ lepas (km_remove, removal_reason) → tutup instalasi 🔁 tyre: removed  (movement removal)
         → total_km_run += (km_remove − km_install)
-        ├─ masih layak → kembali ke stok used         🔁 tyre: in_stock (condition=used)
-        │     → keputusan: pakai lagi / vulkanisir / scrap
+        ├─ masih layak → stok used @ GUDANG BEKAS     🔁 tyre: in_stock (condition=used)
+        │     → keputusan: pakai lagi / vulkanisir / usul afkir
         ├─ kirim vulkanisir → supplier                🔁 tyre: retreading (movement retread_send)
         │     → terima kembali: cost→book_value, retread_count↑ 🔁 in_stock (retread_return)
-        │           └─ result=failed → 🔁 scrapped → disposal
-        └─ tidak layak → scrap                        🔁 tyre: scrapped (movement scrap)
-                → wks_tyre_disposals (lot jual/buang + proceeds)
+        │           └─ result=failed → usul afkir
+        └─ tidak layak → usul afkir
+④ KONFIRMASI AFKIR — 👤 Kepala Gudang/Supervisor (izin tyre.condemn)  🔁 tyre: afkir  (movement condemn, alasan, confirmed_by)
+        ✋ SoD: operator usul ≠ supervisor konfirmasi
+⑤ PINDAH ke GUDANG AFKIR                               🔁 tyre: afkir @ GUDANG AFKIR  (movement transfer)
+⑥ JUAL AFKIR (lot) → wks_tyre_disposals (sold + proceeds)  🔁 tyre: scrapped (movement scrap)
+        → buang (discarded) bila tak terjual
 
 Opname ban → scan serial → match/missing/extra/misplaced → adjustment/update lokasi
 ```
@@ -279,31 +420,36 @@ Akumulasi bekas → buat lot scrap
 
 ## 8d. Sesi Kerja Gudang (Opening / Closing)
 
-👤 Operator Gudang (tutup paksa: Supervisor/Admin) · 📄 `wks_inv_shift_sessions`/`_balances`, `wks_inv_stock_movements`
+👤 Operator Gudang (BUKA) · Kepala Gudang/Supervisor (TUTUP) · 📄 `wks_inv_shift_sessions`/`_balances`, `wks_inv_stock_movements`
 
 ```
-Mulai kerja → BUKA SESI (pilih gudang)              🔁 session: open
-   → snapshot SELURUH saldo gudang (opening_qty per SKU+kondisi+lokasi)
-   → 1 sesi open/operator; tanpa sesi → ⛔ transaksi gudang DITOLAK
+MASUK PANEL GUDANG → cek sesi hari ini (warehouse, business_date)
+   → belum open → ⛔ GATE: wajib BUKA SESI dulu; semua Resource gudang terblok
+👤 Operator BUKA SESI (gudang + tanggal)             🔁 session: open
+   → snapshot SELURUH saldo gudang (opening_qty per SKU+kondisi+lokasi) + kehadiran ban
+   → 1 SESI/GUDANG/HARI (unique warehouse_id+business_date); sesi dipakai BERSAMA seharian
+   → (jaring kedua) tanpa sesi open → ⛔ StockService tolak movement
         │
-        ▼  (selama sesi)
-Semua mutasi operator (issue/GRN/transfer/adjustment/teardown/core)
-   → ⚙️ StockService tag shift_session_id ke tiap stock_movement
+        ▼  (selama hari kerja — banyak operator boleh ikut)
+Semua mutasi (issue/GRN/transfer/adjustment/teardown/core, part & ban)
+   → ⚙️ StockService/TyreService tag shift_session_id; pelaku tercatat di created_by
         │
         ▼
-Selesai kerja → TUTUP SESI                           🔁 session: closed
+Akhir hari → 👤 KEPALA GUDANG/SUPERVISOR TUTUP SESI   🔁 session: closed
+   → ⛔ operator biasa TIDAK boleh menutup (izin closing = supervisor)
    → ringkas movement ter-tag: total_movements, in/out qty & nilai
    → snapshot saldo akhir (closing_qty); diff = closing − (opening + in − out)
-   → diff ≠ 0 → anomaly_count↑ (perubahan tak ter-tag / operator lain) → review
+   → diff ≠ 0 → anomaly_count↑ (perubahan tak ter-tag) → review
    → ⚙️ update snapshot gudang (§7c)
+   → setelah closed → siklus hari itu FINAL; kerja lagi = Buka Sesi besok
         │
         ├─ belum ditutup >24 jam → ⚙️ Job terjadwal cek sesi open
         │     → kirim WA + email (event shift.session_overdue) sesuai wks_adm_notification_rules
         │     → penerima/ambang/eskalasi/ulang DIKONFIGURASI DI MASTER; tandai overdue_notify_step
-        └─ operator lupa tutup → Supervisor/Job akhir hari → force_closed
+        └─ lupa tutup → Supervisor/Job akhir hari → force_closed (cegah sesi menggantung lintas hari)
 ```
-⚙️ Akuntabilitas presisi = movement ter-tag sesi; snapshot full = rekonsiliasi state gudang.
-⚙️ Bila gudang dipakai >1 operator, diff sesi mencakup aktivitas operator lain (wajar).
+⚙️ Akuntabilitas presisi = movement ter-tag sesi + `created_by` per aksi; snapshot full = rekonsiliasi state gudang.
+⚙️ Sesi harian dipakai banyak operator; diff sesi = total perubahan tak ter-tag sepanjang hari.
 ⚙️ Notifikasi 24 jam reusable (lapisan Notifikasi modul Admin); WA via gateway, email via Mail.
 
 ---
@@ -358,6 +504,68 @@ Buat Surat Jalan (pilih do_type)              🔁 DO: draft
 
 ---
 
+## 10c. Transaksi Gudang Lain — Pinjam, Retur Supplier, Retur Bon
+
+👤 Gudang (⑦ retur supplier: + Purchasing/Owner) · 📄 `wks_inv_part_loans`, `wks_inv_purchase_returns`, `wks_inv_issue_returns`, `wks_inv_stock_movements`
+⚙️ Semua wajib Sesi `open`, ter-tag, via `StockService`. (Lihat taksonomi MODULES §8.)
+
+```
+⑤ PEMINJAMAN (storing keluar, wajib kembali)
+  Buat Peminjaman (borrower, item, qty)        🔁 loan: open
+   → ⚙️ movement loan_out (qty keluar; TETAP aset, tak dibebankan ke WO)
+   → Terima Kembali (sebagian/penuh)            🔁 loan: partially_returned → returned
+        → ⚙️ movement loan_return (qty masuk)
+   → bila TAK kembali → Konversi jadi Bon (converted_issue_id) → HPP baru dibebankan ke WO
+
+⑦ RETUR KE SUPPLIER (memotong tagihan)
+  Buat Retur (ref PO/GRN, alasan)               🔁 pr: draft
+   → Post → ⚙️ movement return_supplier (stok turun, WAC)   🔁 pr: posted
+   → nota retur → kurangi hutang supplier (AP §9)  🔁 pr: credited (credit_note_no/amount)
+
+⑧ RETUR BON (part baru dari LKM TAK JADI PAKAI)
+  Buat Retur Bon (ref Bon/WO, item, qty)        🔁 ir: draft
+   → Post → ⚙️ movement return_wo (stok naik, new)  🔁 ir: posted
+   → ⚙️ reverse HPP: wo_item.line_cost / total_cost berkurang qty×unit_cost
+```
+⚙️ ⑧ (part **baru** tak terpakai) ≠ ③ Core/Teardown (part **bekas**). ⑤ Loan (masih aset) ≠ ② Bon (pemakaian).
+
+---
+
+## 10d. Audit Gudang (kontrol independen — TIDAK mengubah stok)
+
+👤 **Auditor** (independen; verifikasi) · PIC Gudang (tindak lanjut) · 📄 `wks_inv_audits`/`_items`/`_findings`, (trail: `wks_inv_stock_movements` + `wks_core_audit_logs`)
+⚙️ SoD: Auditor ≠ operator/Kepala Gudang. Audit **read-only stok**; koreksi via opname/penyesuaian.
+
+```
+AUDIT FORMAL
+  👤 Auditor jadwalkan Audit (type, scope gudang/kategori/periode)   🔁 audit: planned
+   → mulai → CEK FISIK independen (audit_items: book_qty vs counted_qty) 🔁 audit: in_progress
+        │ diff signifikan / penyimpangan SOP / anomali
+        ▼
+   Catat TEMUAN (type, severity, expected vs actual, rekomendasi)    🔁 finding: open
+   → (critical → notifikasi Owner/Admin)                            🔁 audit: review
+        │
+        ▼  TINDAK LANJUT (bukan oleh auditor)
+   👤 PIC Gudang isi corrective_action                               🔁 finding: in_progress
+   → koreksi saldo via OPNAME/PENYESUAIAN (movement tertelusur) → link resolution_ref  🔁 finding: resolved
+        │
+        ▼  VERIFIKASI
+   👤 Auditor cek koreksi → 🔁 finding: verified/closed (atau rejected bila tak valid)
+   → semua temuan selesai → 🔁 audit: closed (summary)
+
+REVIEW ANOMALI (sumber temuan ad-hoc, tanpa audit formal)
+  Papan: stok negatif (stock_alerts) · selisih sesi (anomaly_count/diff_qty) · movement tak wajar
+   → 👤 Auditor "Promosikan jadi Temuan" (finding.source_type/source_id) → alur temuan di atas
+
+AUDIT TRAIL (read-only, forensik)
+  Gabungan ledger movement (siapa/kapan/ref/sesi) + core_audit_logs (before→after master/konfig)
+   → filter per SKU/gudang/user/tanggal/jenis — append-only, tak bisa diubah
+```
+⚙️ **Temuan tak menyentuh saldo** — hanya menautkan ke dokumen koreksi (jejak audit utuh).
+⚙️ Auditor **tak boleh** menutup temuannya sendiri sebagai pelaksana koreksi (independensi).
+
+---
+
 ## 11. Invoicing *(future / dormant — mode internal)*
 
 👤 Kasir/Admin · 📄 `wks_svc_invoices`, `wks_svc_payments`
@@ -380,14 +588,26 @@ tidak perlu migrasi besar saat diaktifkan.
 | Purchase Order | draft → approved → partial → received → closed (· cancelled) |
 | Surat Jalan Masuk (Supplier) | draft → submitted → received (· cancelled) |
 | Serah Terima (GRN) | draft → checking → posted |
+| Kontrabon (Tanda Terima Tagihan/AP) | draft → checking → verified → approved → partially_paid → paid (· rejected · cancelled) |
+| Baris Tagihan (cek satu per satu) | pending → ok / problem |
+| Request Pembayaran (maker→checker) | draft → submitted → approved → paid (· rejected · cancelled) |
+| Realisasi Pembayaran Supplier (AP) | draft → posted → cleared (giro) (· cancelled) |
+| Register Giro | registered → printed → signed → verified → released → cleared (· bounced · cancelled) |
 | Surat Jalan Keluar (DO) | draft → in_transit → delivered (· cancelled) |
 | Tally Sheet | draft → completed |
+| PMB (Permintaan Mobil Masuk) | issued → used / cancelled |
 | LKM | entered → in_progress → done → exited |
 | Work Order | queued → waiting_part → in_progress → qc → done → delivered |
 | Bon Pengeluaran Sparepart | draft → submitted → approved/rejected → partially_issued → issued (· cancelled) |
+| Peminjaman Part (Loan) | open → partially_returned → returned (· cancelled) |
+| Retur ke Supplier | draft → posted → credited (· cancelled) |
+| Retur Bon (part tak jadi pakai) | draft → posted (· cancelled) |
 | Core Return | pending → stored → released |
 | Sesi Kerja Gudang | open → closed (· force_closed) |
 | Stock Opname | draft → counting → posted |
+| Audit Gudang | planned → in_progress → review → closed (· cancelled) |
+| Temuan Audit (Finding) | open → in_progress → resolved → verified → closed (· rejected) |
+| Ban (Tyre) | in_stock (baru/bekas) → installed → removed → (retreading) → **afkir** → scrapped |
 | Ban (Tyre) | in_stock → installed → removed → (retreading →) in_stock / scrapped |
 | Invoice *(future)* | draft → issued → partial → paid |
 
